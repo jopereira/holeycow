@@ -35,6 +35,9 @@
 #include "defs.h"
 #include "mytime.h"
 
+//#include "tapdisk.h"
+#include "holeyaio.h"
+
 #define STAB_PORT		12345
 #define STAB_QUEUE	1000
 
@@ -129,17 +132,33 @@ static void master_cb(block_t id) {
 	off_t offset=id&OFFMASK;
 	int boff=offset>>FDBITS;
 
+        
+        //TODO substituir com o holey_aio_write...
+        //holey_aio_write(aio, herd[fd].storage, BLKSIZE, offset, herd[fd].cache[boff], cb, id, sector, private,boff,fd,1);
 	pwrite(herd[fd].storage, herd[fd].cache[boff], BLKSIZE, offset);
-	free(herd[fd].cache[boff]);
-	herd[fd].cache[boff]=NULL;
 
-	st_w_stab_blks++;
+        //TODO código a ser colado nos callbacks ver os locks....
+        free(herd[fd].cache[boff]);
+        herd[fd].cache[boff]=NULL;
+        st_w_stab_blks++;
 
 	pthread_mutex_unlock(&mutex_cow);
 
 	/* printf("MASTER: storage persistent - block %d\n", id); */
 
 }
+
+/*
+static void run_after_write_cb(int fd,int boff){
+
+
+    //TODO código a ser colado nos callbacks ver os locks....
+    free(herd[fd].cache[boff]);
+    herd[fd].cache[boff]=NULL;
+    st_w_stab_blks++;
+
+
+}*/
 
 static int master_open(char* path, int flags) {
 
@@ -170,7 +189,7 @@ static int master_open(char* path, int flags) {
 	return res;
 }
 
-static int master_pwrite(int fd, void* data, size_t count, off_t offset) {
+static int master_pwrite(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
 	pthread_mutex_lock(&mutex_cow);
 
 	int done=0;
@@ -184,7 +203,8 @@ static int master_pwrite(int fd, void* data, size_t count, off_t offset) {
 		int boff=cursor>>FDBITS;
 
 		if (test_and_set(id)) {
-			pwrite(herd[fd].storage, data, bcount, offset);
+			holey_aio_write(aio, herd[fd].storage, bcount, offset, (char*) data, cb, id1, sector, private,0,0,0);
+                        //pwrite(herd[fd].storage, data, bcount, offset);
 
 			st_w_reg_blks++;
 		} else {
@@ -192,6 +212,7 @@ static int master_pwrite(int fd, void* data, size_t count, off_t offset) {
 				herd[fd].cache[boff]=malloc(BLKSIZE);
 				if (bcount!=BLKSIZE) {
 					st_frag_blks++;
+                                        //deixei sincrono
 					pread(herd[fd].storage, herd[fd].cache[boff], BLKSIZE, cursor);
 				}
 				add_block(id);
@@ -210,7 +231,7 @@ static int master_pwrite(int fd, void* data, size_t count, off_t offset) {
 	return done;
 }
 
-static int master_pread(int fd, void* data, size_t count, off_t offset) {
+static int master_pread(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
 
 	pthread_mutex_lock(&mutex_cow);
 
@@ -226,10 +247,12 @@ static int master_pread(int fd, void* data, size_t count, off_t offset) {
 
 		if (herd[fd].cache[boff]!=NULL) {
 			st_r_stab_blks++;
+                        //DUVIDA o que aqui faz é se cache nao ta vazia le o resultado daqui...
 			memcpy(data, herd[fd].cache[boff]+(offset-cursor), bcount);
 		} else {
 			st_r_reg_blks++;
-			pread(herd[fd].storage, data, bcount, offset);
+                        holey_aio_read(aio, herd[fd].storage, bcount, offset, (char*) data, cb, id1, sector, private);
+			//pread(herd[fd].storage, data, bcount, offset);
 		}
 
 		offset+=bcount;
@@ -322,8 +345,12 @@ static void slave_cb(block_t id) {
 
 		char data[BLKSIZE];
 		int fd=id&FDMASK;
-		off_t offset=id&OFFMASK;
+ 		off_t offset=id&OFFMASK;
 
+                //DUVIDA aqui como faço?? ponho I/O assincrono??
+                //não é necessário saber quando isto acaba?? tou a pensar que pode dar problemas de concorrencia
+                //se master depois escreve primeiro... aqui se for assincrono quando tiver o callback tenho de responder para
+                //o master a dizer que ja tenho o bloco.... Isso não é feito neste código
 		pread(herd[fd].storage, data, BLKSIZE, offset);
 		pwrite(herd[fd].snapshot, data, BLKSIZE, offset);
 
@@ -341,7 +368,7 @@ static void slave_cb(block_t id) {
 }
 
 
-static int slave_pwrite(int fd, void* data, size_t count, off_t offset) {
+static int slave_pwrite(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
 	pthread_mutex_lock(&mutex_cow);
 
 	int done=0;
@@ -366,7 +393,8 @@ static int slave_pwrite(int fd, void* data, size_t count, off_t offset) {
 			eoffset=cursor;
 		}
 
-		pwrite(herd[fd].snapshot, buf, ecount, eoffset);
+                holey_aio_write(aio, herd[fd].snapshot, ecount, eoffset, (char*) buf, cb, id1, sector, private,0,0,0);
+		//pwrite(herd[fd].snapshot, buf, ecount, eoffset);
 		st_w_stab_blks++;
 
 		offset+=bcount;
@@ -380,7 +408,7 @@ static int slave_pwrite(int fd, void* data, size_t count, off_t offset) {
 	return done;
 }
 
-static int slave_pread(int fd, void* data, size_t count, off_t offset) {
+static int slave_pread(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
 	pthread_mutex_lock(&mutex_cow);
 
 	int done=0;
@@ -400,8 +428,11 @@ static int slave_pread(int fd, void* data, size_t count, off_t offset) {
 			src=herd[fd].storage;
 			st_r_reg_blks++;
 		}
-			
-		pread(src, data, bcount, offset);
+		
+                holey_aio_read(aio, src, bcount, offset, (char*) data, cb, id1, sector, private)
+                //DUVIDA aqui sector ta bem??
+                //vai ser usado no callback mas não quer dizer que seja o correcto mas acho que é o que queremos responder à VM...	
+		//pread(src, data, bcount, offset);
 
 
 		offset+=bcount;
@@ -549,14 +580,14 @@ static int orig_close(int fd) {
 	return close(fd);
 }
 
-static int orig_pwrite(int fd, void* data, size_t count, off_t offset) {
+static int orig_pwrite(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id, uint64_t sector, void* private) {
 	pthread_mutex_lock(&mutex_cow);
 	st_w_reg_blks++;
 	pthread_mutex_unlock(&mutex_cow);
 	return pwrite(fd, data, count, offset);
 }
 
-static int orig_pread(int fd, void* data, size_t count, off_t offset) {
+static int orig_pread(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id, uint64_t sector, void* private) {
 	pthread_mutex_lock(&mutex_cow);
 	st_r_reg_blks++;
 	pthread_mutex_unlock(&mutex_cow);
@@ -631,8 +662,8 @@ void holey_init(int profile, char* master_ip, int n_slaves, char* cow_basedir) {
 void (*holey_start)(int) = holey_cow_start_null;
 int (*holey_open)(char*, int) = orig_open;
 int (*holey_close)(int) = orig_close;
-int (*holey_pwrite)(int, void*, size_t, off_t) = orig_pwrite;
-int (*holey_pread)(int, void*, size_t, off_t) = orig_pread;
+int (*holey_pwrite)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback_t, int, uint64_t, void*) = orig_pwrite;
+int (*holey_pread)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback_t, int, uint64_t, void*) = orig_pread;
 int (*holey_fsync)(int) = orig_fsync;
 off_t (*holey_lseek)(int, off_t, int) = orig_lseek;
 
