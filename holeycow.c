@@ -34,11 +34,14 @@
 #include "stability.h"
 #include "defs.h"
 #include "mytime.h"
+//#include "master_stab.c"
+//#include "slave_stab.c"
+//#include "mytime.c"
 
 //#include "tapdisk.h"
 #include "holeyaio.h"
 
-#define STAB_PORT		12345
+#define STAB_PORT	12345
 #define STAB_QUEUE	1000
 
 pthread_mutex_t mutex_cow = PTHREAD_MUTEX_INITIALIZER; 
@@ -77,7 +80,7 @@ static void* stats_thread(void* p) {
 
 	while(1) {
 		sleep(10);
-		printf("*HC* %.0lf %ld %ld %ld %ld %ld %ld %ld\n", 
+		printf("*HC* %.0lf %ld %ld %ld %ld %ld %ld %ld %ld %ld\n", 
 			now(SECONDS), 
 			st_r_reg_blks, 
 			st_w_reg_blks,
@@ -125,12 +128,16 @@ static inline int test(int id) {
 static void master_cb(block_t id) {
 
 	/* printf("MASTER: everyone copied block %d\n", id); */
+        //CHANGED
+        int fd;
+        off_t offset;
+        int boff;
 
 	pthread_mutex_lock(&mutex_cow);
 
-	int fd=id&FDMASK;
-	off_t offset=id&OFFMASK;
-	int boff=offset>>FDBITS;
+	fd=id&FDMASK;
+	offset=id&OFFMASK;
+	boff=offset>>FDBITS;
 
         
         //TODO substituir com o holey_aio_write...
@@ -162,20 +169,25 @@ static void run_after_write_cb(int fd,int boff){
 
 static int master_open(char* path, int flags) {
 
+        int res;
+        int fdaux;
+        int mycow;
+        int maxblk;      
+
 	pthread_mutex_lock(&mutex_cow);
-	int res;
+	
 
 	// FIXME: should propagate permission flags
-	int fdaux = open(path, flags, 0644);
+	fdaux = open(path, flags, 0644);
 	if(fdaux < 0) {
 		res = -1;
 	} else {
-		int mycow=ncow++;
+		mycow=ncow++;
 
 		herd[mycow].storage=fdaux;
 		herd[mycow].storage_fname = strdup(path);
 
-		int maxblk=lseek(herd[mycow].storage, 0, SEEK_END)/BLKSIZE;
+		maxblk=lseek(herd[mycow].storage, 0, SEEK_END)/BLKSIZE;
 		lseek(herd[mycow].storage, 0, SEEK_SET);
 
 		herd[mycow].bitmap=(int*)calloc(maxblk/8+sizeof(int),1);
@@ -190,9 +202,12 @@ static int master_open(char* path, int flags) {
 }
 
 static int master_pwrite(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
+
+        int done;
+
 	pthread_mutex_lock(&mutex_cow);
 
-	int done=0;
+	done=0;
 
 	while(count>0) {
 		int cursor=offset&OFFMASK;
@@ -233,9 +248,11 @@ static int master_pwrite(int fd, void* data, size_t count, off_t offset, holey_a
 
 static int master_pread(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
 
+        int done;
+
 	pthread_mutex_lock(&mutex_cow);
 
-	int done=0;
+	done =0;
 
 	while(count>0) {
 		int cursor=offset&OFFMASK;
@@ -269,7 +286,7 @@ static int master_pread(int fd, void* data, size_t count, off_t offset, holey_ai
 static int master_fsync(int fd) {
 	/* printf("MASTER: SYNCing...\n"); */
 
-	wait_sync();
+	wait_sync(0);
 
 	pthread_mutex_lock(&mutex_cow);
 	fsync(herd[fd].storage);
@@ -281,8 +298,14 @@ static int master_fsync(int fd) {
 }
 
 static void master_init(int nslaves, int sz) {
+        
 	int sfd,*fd,len,i,j,on=1;
 	struct sockaddr_in master, slave;
+        FILE* fp;
+
+        fp=fopen("home/jtpaulo/holey/logs/log","a");
+        fprintf(fp,"inicio \n");
+        fclose(fp);              
 
 	fd=(int*)calloc(nslaves, sizeof(int));
 
@@ -295,20 +318,55 @@ static void master_init(int nslaves, int sz) {
 	memset(&master, 0, sizeof(master));
 	master.sin_family = PF_INET;
 	master.sin_port = htons(STAB_PORT);
+        //master.sin_port = htons(12350);
 	master.sin_addr.s_addr = htonl(INADDR_ANY);
 
-	if (bind(sfd, (struct sockaddr*)&master, sizeof(master))<0) {
-		perror("port 12346");
-		exit(1);
+        fp=fopen("home/jtpaulo/holey/logs/log","a");
+        fprintf(fp,"antes bind \n");
+        fclose(fp);
+        
+	while (bind(sfd, (struct sockaddr*)&master, sizeof(master))<0) {
+                perror("port 12345");
+                sleep(20);
+		//exit(1);
 	}
 
+        fp=fopen("home/jtpaulo/holey/logs/log","a");
+        fprintf(fp,"sai uma vez \n");
+        fclose(fp);
+
+    
 	listen(sfd, SOMAXCONN);
 
+
+        //sleep(60);
+
+        fp=fopen("home/jtpaulo/holey/logs/log","a");
+        fprintf(fp,"depois listen addddhhh \n");
+        fclose(fp);
+
 	for(i=0;i<nslaves;i++) {
+                fp=fopen("home/jtpaulo/holey/logs/log","a");
+                fprintf(fp,"dentro for \n");
+                fclose(fp);
+
 		len=0;
 		memset(&slave, 0, sizeof(slave));
-		fd[i] = accept(sfd, (struct sockaddr*)&slave, &len);
+
+                fp=fopen("home/jtpaulo/holey/logs/log","a");
+                fprintf(fp,"depois memset \n");
+                fclose(fp);
+
+		fd[i] = accept(sfd, (struct sockaddr*)&slave,(socklen_t*)&len);
+
+                fp=fopen("home/jtpaulo/holey/logs/log","a");
+                fprintf(fp,"depois accept \n");
+                fclose(fp);
 	}
+
+        fp=fopen("home/jtpaulo/holey/logs/log","a");
+        fprintf(fp,"antes do master_stab \n");
+        fclose(fp);
 
 	master_stab(fd, nslaves, sz, master_cb);
 }
@@ -332,6 +390,8 @@ static int master_close(int fd) {
 	// FIXME: should't assume LIFO open/close
 	//ncow--;
 	pthread_mutex_unlock(&mutex_cow);
+        //ADDED
+        return 0;
 }
 
 /*****************************************************
@@ -369,9 +429,11 @@ static void slave_cb(block_t id) {
 
 
 static int slave_pwrite(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
+        int done;
+
 	pthread_mutex_lock(&mutex_cow);
 
-	int done=0;
+	done=0;
 
 	while(count>0) {
 		int cursor=offset&OFFMASK;
@@ -409,9 +471,10 @@ static int slave_pwrite(int fd, void* data, size_t count, off_t offset, holey_ai
 }
 
 static int slave_pread(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
+        int done;
 	pthread_mutex_lock(&mutex_cow);
 
-	int done=0;
+	done=0;
 
 	while(count>0) {
 		int cursor=offset&OFFMASK;
@@ -429,7 +492,7 @@ static int slave_pread(int fd, void* data, size_t count, off_t offset, holey_aio
 			st_r_reg_blks++;
 		}
 		
-                holey_aio_read(aio, src, bcount, offset, (char*) data, cb, id1, sector, private)
+                holey_aio_read(aio, src, bcount, offset, (char*) data, cb, id1, sector, private);
                 //DUVIDA aqui sector ta bem??
                 //vai ser usado no callback mas não quer dizer que seja o correcto mas acho que é o que queremos responder à VM...	
 		//pread(src, data, bcount, offset);
@@ -455,12 +518,16 @@ static int slave_fsync(int fd) {
 }
 
 static int slave_open(char* path, int flags) {
+
+        int res;
+	int fdaux;
+
 	pthread_mutex_lock(&mutex_cow);
 
 	/* TODO: what about O_RDONLY flag */
 	// FIXME: should propagate permission flags
-	int fdaux = open(path, flags, 0644);
-	int res;
+        
+	fdaux = open(path, flags, 0644);
 
 	if(fdaux < 0) {
 		res = fdaux;
@@ -531,7 +598,7 @@ static void slave_init(char* addr, int sz, char* p_cow_basedir) {
 	}
 
 	/* stats */
-	timer_start();
+	timer_start(0);
 
 	slaveid=slave_stab(fd, sz, slave_cb);
 }
@@ -561,6 +628,8 @@ static int slave_close(int fd) {
 	// Shouldn't assume LIFO open/close order
 	//ncow--;
 	pthread_mutex_unlock(&mutex_cow);
+        //ADDED
+        return 0;
 
 }
 
@@ -580,22 +649,27 @@ static int orig_close(int fd) {
 	return close(fd);
 }
 
-static int orig_pwrite(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id, uint64_t sector, void* private) {
+//TODO falta mudar aqui....
+static int orig_pwrite(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
 	pthread_mutex_lock(&mutex_cow);
 	st_w_reg_blks++;
 	pthread_mutex_unlock(&mutex_cow);
-	return pwrite(fd, data, count, offset);
+        return holey_aio_write(aio, fd, count, offset, (char*) data, cb, id1, sector, private,0,0,0);
+	//return pwrite(fd, data, count, offset);
 }
 
-static int orig_pread(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id, uint64_t sector, void* private) {
+static int orig_pread(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
 	pthread_mutex_lock(&mutex_cow);
 	st_r_reg_blks++;
 	pthread_mutex_unlock(&mutex_cow);
-	return pread(fd, data, count, offset);
+        return holey_aio_read(aio, fd, count, offset, (char*) data, cb, id1, sector, private);
+	//return pread(fd, data, count, offset);
 }
 
 static int orig_fsync(int fd) {
 	fsync(fd);
+        //ADDED
+        return 0;
 }
 
 static off_t orig_lseek(int fd, off_t offset, int whence) {
@@ -625,8 +699,9 @@ void holey_init(int profile, char* master_ip, int n_slaves, char* cow_basedir) {
 			holey_fsync = master_fsync;
 			holey_lseek = master_lseek;
 		
+                        
 			master_init(n_slaves, STAB_QUEUE);
-			break;
+                        break;
 
 		case HOLEY_SERVER_STATUS_SLAVE:
 			printf("Selected Holey Server Profile: SLAVE\n");

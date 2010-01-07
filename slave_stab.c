@@ -23,6 +23,7 @@
 #include <stdio.h>
 
 #include "stability.h"
+#include <unistd.h>
 
 /* Circular buffer with 2 tails. Invariant: sn <= rn */
 static block_t* buffer;
@@ -88,10 +89,11 @@ static void* pool_thread(void* p) {
 	pthread_mutex_lock(&mux);
 	while(1) {
 
+                int idx;
 		while(rn==0)
 			pthread_cond_wait(&notempty, &mux);
 
-		int idx=rt;
+		idx=rt;
 		rt=(rt+1)%max;
 		rn--;
 
@@ -114,12 +116,13 @@ static void send(int size) {
 
 static void* sender_thread(void* p) {
 	while(1) {
-		pthread_mutex_lock(&mux);
+                int size;
+ 		pthread_mutex_lock(&mux);
 
 		while(sn==0 || buffer[st]!=-1)
 			pthread_cond_wait(&ready, &mux);
 
-		int size=0;
+		size=0;
 		while(sn-size>0 && buffer[st+size]==-1)
 			size++;
 

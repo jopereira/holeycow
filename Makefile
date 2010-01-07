@@ -44,6 +44,7 @@ BLK-OBJS-y  += block-qcow2.o
 BLK-OBJS-y  += aes.o
 BLK-OBJS-y  += tapaio.o
 BLK-OBJS-y  += holeyaio.o
+BLK-OBJS-y  += slave_stab.o master_stab.o mytime.o
 BLK-OBJS-$(CONFIG_Linux) += blk_linux.o
 
 BLKTAB-OBJS-y := blktapctrl.o

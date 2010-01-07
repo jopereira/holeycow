@@ -22,6 +22,7 @@
 #include <assert.h>
 
 #include "stability.h"
+#include <unistd.h>
 
 /* Circular buffer with 2 tails. Invariant: sn <= rn */
 static block_t* buffer;
@@ -36,7 +37,7 @@ static int eh, et;		/* epoch for sync (h=eh%max, ft=et%max) */
 static int started = 0;
 
 static pthread_mutex_t mux;
-static pthread_cond_t notempty, ready, sync;
+static pthread_cond_t notempty, ready, sync1;
 
 static int* sock;
 
@@ -60,10 +61,12 @@ static void* sender_thread(void* p) {
 	pthread_mutex_lock(&mux);
 
 	while(1) {
+
+                int size;
 		while(sn==0)
 			pthread_cond_wait(&notempty, &mux);
 
-		int size=sn>500?500:sn;
+		size=sn>500?500:sn;
 		if (st+size>max)
 			size=max-st;
 
@@ -127,10 +130,11 @@ static void* pool_thread(void* p) {
 	pthread_mutex_lock(&mux);
 	while(1) {
 
+                int idx;
 		while(rn==0)
 			pthread_cond_wait(&ready, &mux);
 
-		int idx=rt;
+		idx=rt;
 		rt=(rt+1)%max;
 		rn--;
 
@@ -150,7 +154,7 @@ static void* pool_thread(void* p) {
 
 			et++;
 		}
-		pthread_cond_broadcast(&sync);
+		pthread_cond_broadcast(&sync1);
 	}
 }
 
@@ -173,7 +177,7 @@ void master_stab(int s[], int nslaves, int sz, callback_t cb) {
 	pthread_mutex_init(&mux, NULL);
 	pthread_cond_init(&notempty, NULL);
 	pthread_cond_init(&ready, NULL);
-	pthread_cond_init(&sync, NULL);
+	pthread_cond_init(&sync1, NULL);
 }
 
 void master_start(int npool) {
@@ -210,7 +214,7 @@ int add_block(block_t id) {
 	return result;
 }
 
-void wait_sync() {
+void wait_sync(int dump) {
 	int target;
 
 	if(! started )
@@ -220,7 +224,7 @@ void wait_sync() {
 
 	target=eh;
 	while(et<eh)
-		pthread_cond_wait(&sync, &mux);
+		pthread_cond_wait(&sync1, &mux);
 	
 	pthread_mutex_unlock(&mux);
 }

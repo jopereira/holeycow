@@ -23,7 +23,7 @@
 
 static double begining_of_time = -1;
 
-void timer_start() {
+void timer_start(int dump) {
 
 	if(begining_of_time == -1) {
 		struct timeval tv;
@@ -43,6 +43,6 @@ double now(int prec) {
 	return (double) ((tv.tv_sec + (((double)tv.tv_usec) / MICROSECONDS)) - begining_of_time) * prec;
 }
 
-void timer_stop() {
+void timer_stop(int dump) {
 	begining_of_time = -1;
 }

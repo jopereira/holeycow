@@ -27,7 +27,7 @@ typedef void (*callback_t)(block_t);
 void master_stab(int* sock, int nslaves, int s, callback_t cb);
 void master_start(int npool);
 int add_block(block_t id);
-void wait_sync();
+void wait_sync(int dump);
 
 /* slave aka replica */
 int slave_stab(int sock, int s, callback_t cb);

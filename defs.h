@@ -21,6 +21,7 @@
 #define __DEFS__
 
 #define MAXFILES 16
-#define BLKSIZE (16*1024)
+//TODO changed here
+#define BLKSIZE (4*1024)
 
 #endif

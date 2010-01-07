@@ -23,5 +23,5 @@
 #define SECONDS			1
 
 double now(int precision);
-void timer_start();
-void timer_stop();
+void timer_start(int dump);
+void timer_stop(int dump);
