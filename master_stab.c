@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <assert.h>
+#include <stdio.h>
 
 #include "stability.h"
 #include <unistd.h>
@@ -58,6 +59,12 @@ static void send(void* blocks, int size) {
 }
 
 static void* sender_thread(void* p) {
+        FILE *fp;     
+ 
+
+        fp=fopen("home/jtpaulo/holey/logs/addblock","a");
+        fprintf(fp,"tou na thread sender\n");
+        fclose(fp);
 	pthread_mutex_lock(&mux);
 
 	while(1) {
@@ -65,6 +72,10 @@ static void* sender_thread(void* p) {
                 int size;
 		while(sn==0)
 			pthread_cond_wait(&notempty, &mux);
+
+                fp=fopen("home/jtpaulo/holey/logs/addblock","a");
+                fprintf(fp,"tou na thread sender acordei!!!!!\n");
+                fclose(fp);
 
 		size=sn>500?500:sn;
 		if (st+size>max)
@@ -74,9 +85,14 @@ static void* sender_thread(void* p) {
 
 		st_n_blks+=size;
 		st_n_msgs++;
-		send(buffer+st, size*sizeof(int));
+		send(buffer+st, size*sizeof(uint64_t));
 
-		/* printf("MASTER: stability sent %d blocks\n", size); */
+                fp=fopen("home/jtpaulo/holey/logs/addblock","a");
+                fprintf(fp,"tou na thread sender depois send!!!!!\n");
+                fclose(fp);
+
+
+		printf("MASTER: stability sent %d blocks\n", size);
 
 		usleep(1000);
 
@@ -87,6 +103,8 @@ static void* sender_thread(void* p) {
 	}
 }
 
+
+//TODO mudar aqui no receive...
 static int receive(int id) {
 	int result, r=0;
 	r=read(sock[id], &result, sizeof(result));
@@ -111,7 +129,7 @@ static void* receiver_thread(void* p) {
 				size=sizes[i];
 		}
 
-		/* printf("MASTER: stability received %d blocks\n", size); */
+		printf("MASTER: stability received %d blocks\n", size);
 
 		if (size>0) {
 			for(i=0;i<slaves;i++)
@@ -127,6 +145,13 @@ static void* receiver_thread(void* p) {
 }
 
 static void* pool_thread(void* p) {
+        FILE* fp;
+
+        fp=fopen("home/jtpaulo/holey/logs/poolthread","a");
+        fprintf(fp,"tou na pool thread,,!!!!!\n");
+        fclose(fp);
+
+
 	pthread_mutex_lock(&mux);
 	while(1) {
 
@@ -134,6 +159,12 @@ static void* pool_thread(void* p) {
 		while(rn==0)
 			pthread_cond_wait(&ready, &mux);
 
+
+                fp=fopen("home/jtpaulo/holey/logs/poolthread","a");
+                fprintf(fp,"tou na pool thread acordei!!!!!\n");
+                fclose(fp);
+                
+         
 		idx=rt;
 		rt=(rt+1)%max;
 		rn--;
@@ -162,7 +193,7 @@ void master_stab(int s[], int nslaves, int sz, callback_t cb) {
 	int i;
 
 	max=sz;
-	buffer=(int*)calloc(sizeof(int), max);
+	buffer=(uint64_t*)calloc(sizeof(uint64_t), max);
 
 	callback=cb;
 
@@ -194,6 +225,12 @@ void master_start(int npool) {
 
 int add_block(block_t id) {
 	int result;
+        FILE *fp;
+
+        fp=fopen("home/jtpaulo/holey/logs/addblock","a");
+        fprintf(fp,"tou no add_block\n");
+        fclose(fp);
+        
 
 	pthread_mutex_lock(&mux);
 
@@ -210,6 +247,11 @@ int add_block(block_t id) {
 	pthread_cond_signal(&notempty);
 
 	pthread_mutex_unlock(&mux);
+
+        fp=fopen("home/jtpaulo/holey/logs/addblock","a");
+        fprintf(fp,"tou no add_block antes perror\n");
+        fclose(fp);
+        perror("");
 
 	return result;
 }

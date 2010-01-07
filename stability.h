@@ -17,10 +17,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+#include <stdint.h>
+
 #ifndef __STAB__
 #define __STAB__
 
-typedef int block_t;
+typedef uint64_t block_t;
 typedef void (*callback_t)(block_t);
 
 /* master aka designated writer */

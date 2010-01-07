@@ -99,11 +99,12 @@ static void* stats_thread(void* p) {
  * no slave: reg (da storage), stab (da copia), frag, fetch (adicionais)
  */
 
-static inline int test_and_set(int id) {
+static inline int test_and_set(uint64_t id) {
+        //isto da sempre pequeno mas havera prob de ter o if uint64 ??'
 	int fd=id&FDMASK;
-	int boff=(id&OFFMASK)>>FDBITS;
+	uint64_t boff=(id&OFFMASK)>>FDBITS;
 	
-	int idx=boff/(8*sizeof(int));
+	uint64_t idx=boff/(8*sizeof(int));
 	int mask=1<<(boff%(8*sizeof(int)));
 	int result=herd[fd].bitmap[idx]&mask;
 	herd[fd].bitmap[idx]|=mask;
@@ -113,9 +114,9 @@ static inline int test_and_set(int id) {
 
 static inline int test(int id) {
 	int fd=id&FDMASK;
-	int boff=(id&OFFMASK)>>FDBITS;
+	uint64_t boff=(id&OFFMASK)>>FDBITS;
 	
-	int idx=boff/(8*sizeof(int));
+	uint64_t idx=boff/(8*sizeof(int));
 	int mask=1<<(boff%(8*sizeof(int)));
 	int result=herd[fd].bitmap[idx]&mask;
 	return result;
@@ -127,11 +128,18 @@ static inline int test(int id) {
 
 static void master_cb(block_t id) {
 
-	/* printf("MASTER: everyone copied block %d\n", id); */
+        FILE *fp;
+
+        
+        /* printf("MASTER: everyone copied block %d\n", id); */
         //CHANGED
         int fd;
         off_t offset;
-        int boff;
+        uint64_t boff;
+
+        fp=fopen("home/jtpaulo/holey/logs/cbmaster","a");
+        fprintf(fp,"entrei callback master...\n");
+        fclose(fp);
 
 	pthread_mutex_lock(&mutex_cow);
 
@@ -143,6 +151,8 @@ static void master_cb(block_t id) {
         //TODO substituir com o holey_aio_write...
         //holey_aio_write(aio, herd[fd].storage, BLKSIZE, offset, herd[fd].cache[boff], cb, id, sector, private,boff,fd,1);
 	pwrite(herd[fd].storage, herd[fd].cache[boff], BLKSIZE, offset);
+        //cb(dd, (ret < 0) ? ret: 0, sector, nb_sectors, id, private);
+
 
         //TODO código a ser colado nos callbacks ver os locks....
         free(herd[fd].cache[boff]);
@@ -152,6 +162,10 @@ static void master_cb(block_t id) {
 	pthread_mutex_unlock(&mutex_cow);
 
 	/* printf("MASTER: storage persistent - block %d\n", id); */
+
+        fp=fopen("home/jtpaulo/holey/logs/cbmaster","a");
+        fprintf(fp,"sai callback master...\n");
+        fclose(fp);
 
 }
 
@@ -172,7 +186,7 @@ static int master_open(char* path, int flags) {
         int res;
         int fdaux;
         int mycow;
-        int maxblk;      
+        uint64_t maxblk;      
 
 	pthread_mutex_lock(&mutex_cow);
 	
@@ -204,25 +218,43 @@ static int master_open(char* path, int flags) {
 static int master_pwrite(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
 
         int done;
+        FILE* fp;
+
+
+        fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+        fprintf(fp,"write... offset %llu size %d\n",offset,count);
+        fclose(fp);
 
 	pthread_mutex_lock(&mutex_cow);
 
 	done=0;
 
 	while(count>0) {
-		int cursor=offset&OFFMASK;
+		uint64_t cursor=offset&OFFMASK;
 		int bcount=offset+count > cursor+BLKSIZE ?
 						cursor+BLKSIZE-offset : count;
 
 		block_t id=cursor|fd;
-		int boff=cursor>>FDBITS;
+		uint64_t boff=cursor>>FDBITS;
+
+                //temp
+                //bcount=count;
+                fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                fprintf(fp,"offset %llu count %d cursor %llu bcount %d boff %llu\n",offset,count,cursor,bcount,boff);
+                fclose(fp);
 
 		if (test_and_set(id)) {
-			holey_aio_write(aio, herd[fd].storage, bcount, offset, (char*) data, cb, id1, sector, private,0,0,0);
-                        //pwrite(herd[fd].storage, data, bcount, offset);
+                         fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                         fprintf(fp,"if...\n");
+                         fclose(fp);
+			 holey_aio_write(aio, herd[fd].storage, bcount, offset, (char*) data, cb, id1, sector, private,0,0,0);
+                         //pwrite(herd[fd].storage, data, bcount, offset);
 
 			st_w_reg_blks++;
 		} else {
+                        fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                        fprintf(fp,"else...\n");
+                        fclose(fp);
 			if (herd[fd].cache[boff]==NULL) {
 				herd[fd].cache[boff]=malloc(BLKSIZE);
 				if (bcount!=BLKSIZE) {
@@ -230,7 +262,13 @@ static int master_pwrite(int fd, void* data, size_t count, off_t offset, holey_a
                                         //deixei sincrono
 					pread(herd[fd].storage, herd[fd].cache[boff], BLKSIZE, cursor);
 				}
+                                fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                                fprintf(fp,"antes add block\n");
+                                fclose(fp);
 				add_block(id);
+                                fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                                fprintf(fp,"add block\n");
+                                fclose(fp);
 			}
 			memcpy(herd[fd].cache[boff]+(offset-cursor), data, bcount);
 		}
@@ -241,7 +279,14 @@ static int master_pwrite(int fd, void* data, size_t count, off_t offset, holey_a
 		done+=bcount;
 	}
 
+        fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+        fprintf(fp,"antes libertar lock\n");
+        fclose(fp);
 	pthread_mutex_unlock(&mutex_cow);
+
+        fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+        fprintf(fp,"depois libertar lock\n");
+        fclose(fp);
 
 	return done;
 }
@@ -249,36 +294,70 @@ static int master_pwrite(int fd, void* data, size_t count, off_t offset, holey_a
 static int master_pread(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
 
         int done;
+        FILE* fp;
 
+
+        fp=fopen("home/jtpaulo/holey/logs/readmaster","a");
+        fprintf(fp,"read... offset %llu size %d\n",offset,count);
+        fclose(fp);
 	pthread_mutex_lock(&mutex_cow);
+
+        fp=fopen("home/jtpaulo/holey/logs/readmaster","a");
+        fprintf(fp,"entrei lock offset %llu size %d\n",offset,count);
+        fclose(fp);
 
 	done =0;
 
 	while(count>0) {
-		int cursor=offset&OFFMASK;
+		uint64_t cursor=offset&OFFMASK;
 		int bcount=offset+count > cursor+BLKSIZE ?
 						cursor+BLKSIZE-offset : count;
 
 		block_t id=cursor|fd;
-		int boff=cursor>>FDBITS;
+		uint64_t boff=cursor>>FDBITS;
+
+                fp=fopen("home/jtpaulo/holey/logs/readmaster","a");
+                fprintf(fp,"offset %llu count %d cursor %llu bcount %d boff %llu\n",offset,count,cursor,bcount,boff);
+                fclose(fp);
+
+                //temp
+                //bcount=count;
 
 		if (herd[fd].cache[boff]!=NULL) {
+
+                        fp=fopen("home/jtpaulo/holey/logs/readmaster","a");
+                        fprintf(fp,"cache dif null %llu size %d\n",offset,count);
+                        fclose(fp);
 			st_r_stab_blks++;
                         //DUVIDA o que aqui faz é se cache nao ta vazia le o resultado daqui...
+                        //TODO caso isto aconteça tenho de chamar o callback na mesma aqui porque isto nao vai pro aio...
 			memcpy(data, herd[fd].cache[boff]+(offset-cursor), bcount);
 		} else {
+                        fp=fopen("home/jtpaulo/holey/logs/readmaster","a");
+                        fprintf(fp,"cache nula %llu size %d\n",offset,count);
+                        fclose(fp);
 			st_r_reg_blks++;
                         holey_aio_read(aio, herd[fd].storage, bcount, offset, (char*) data, cb, id1, sector, private);
 			//pread(herd[fd].storage, data, bcount, offset);
 		}
 
+                fp=fopen("home/jtpaulo/holey/logs/readmaster","a");
+                fprintf(fp,"sai if %llu size %d\n",offset,count);
+                fclose(fp);
 		offset+=bcount;
 		count-=bcount;
 		data+=bcount;
 		done+=bcount;
 	}
 
+        fp=fopen("home/jtpaulo/holey/logs/readmaster","a");
+        fprintf(fp,"sai ciclo %llu size %d\n",offset,count);
+        fclose(fp);
 	pthread_mutex_unlock(&mutex_cow);
+
+        fp=fopen("home/jtpaulo/holey/logs/readmaster","a");
+        fprintf(fp,"unlock %llu size %d\n",offset,count);
+        fclose(fp);
 
 	return done;
 }
@@ -307,6 +386,7 @@ static void master_init(int nslaves, int sz) {
         fprintf(fp,"inicio \n");
         fclose(fp);              
 
+        //TODO aqui é int ou uint64_t
 	fd=(int*)calloc(nslaves, sizeof(int));
 
 	sfd=socket(PF_INET, SOCK_STREAM, 0);
@@ -400,6 +480,13 @@ static int master_close(int fd) {
 
 static void slave_cb(block_t id) {
 
+        FILE* fp;
+
+
+        fp=fopen("home/jtpaulo/holey/logs/cbslave","a");
+        fprintf(fp,"entrei callback slave...\n");
+        fclose(fp);
+
 	pthread_mutex_lock(&mutex_cow);
 	if (!test_and_set(id)) {
 
@@ -407,6 +494,7 @@ static void slave_cb(block_t id) {
 		int fd=id&FDMASK;
  		off_t offset=id&OFFMASK;
 
+                //TODO ver o que isto faz....
                 //DUVIDA aqui como faço?? ponho I/O assincrono??
                 //não é necessário saber quando isto acaba?? tou a pensar que pode dar problemas de concorrencia
                 //se master depois escreve primeiro... aqui se for assincrono quando tiver o callback tenho de responder para
@@ -424,6 +512,10 @@ static void slave_cb(block_t id) {
 	}*/
 	pthread_mutex_unlock(&mutex_cow);
 
+        fp=fopen("home/jtpaulo/holey/logs/cbslave","a");
+        fprintf(fp,"sai callback slave...\n");
+        fclose(fp);
+
 
 }
 
@@ -431,21 +523,40 @@ static void slave_cb(block_t id) {
 static int slave_pwrite(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
         int done;
 
+        FILE* fp;
+
+
+        fp=fopen("home/jtpaulo/holey/logs/writeslave","a");
+        fprintf(fp,"write... offset %llu size %d\n",offset,count);
+        fclose(fp);
+
 	pthread_mutex_lock(&mutex_cow);
 
 	done=0;
 
 	while(count>0) {
-		int cursor=offset&OFFMASK;
+		uint64_t cursor=offset&OFFMASK;
 		int bcount=offset+count > cursor+BLKSIZE ?
 						cursor+BLKSIZE-offset : count;
+                
+                //temp
+                //int bcount=count;
+
 
 		block_t id=cursor|fd;
 
+               
+               
 		char tmp[BLKSIZE];
 		void* buf=data;
 		int ecount=bcount;
-		int eoffset=offset;
+		uint64_t eoffset=offset;
+ 
+                fp=fopen("home/jtpaulo/holey/logs/writeslave","a");
+                fprintf(fp,"offset %llu count %d cursor %llu bcount %d\n",offset,count,cursor,bcount);
+                fclose(fp);
+     
+
 		if (!test_and_set(id) && bcount!=BLKSIZE) {
 			st_frag_blks++;
 			pread(herd[fd].storage, tmp, BLKSIZE, cursor);
@@ -457,6 +568,11 @@ static int slave_pwrite(int fd, void* data, size_t count, off_t offset, holey_ai
 
                 holey_aio_write(aio, herd[fd].snapshot, ecount, eoffset, (char*) buf, cb, id1, sector, private,0,0,0);
 		//pwrite(herd[fd].snapshot, buf, ecount, eoffset);
+
+
+                fp=fopen("home/jtpaulo/holey/logs/writeslave","a");
+                fprintf(fp,"depois holy write\n");
+                fclose(fp);
 		st_w_stab_blks++;
 
 		offset+=bcount;
@@ -467,45 +583,84 @@ static int slave_pwrite(int fd, void* data, size_t count, off_t offset, holey_ai
 
 	pthread_mutex_unlock(&mutex_cow);
 
+        fp=fopen("home/jtpaulo/holey/logs/writeslave","a");
+        fprintf(fp,"depois libertar lock\n");
+        fclose(fp);
+
 	return done;
 }
 
 static int slave_pread(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
         int done;
+        FILE *fp;
+
+        fp=fopen("home/jtpaulo/holey/logs/readslave","a");
+        fprintf(fp,"li %llu size %d\n",offset,count);
+        fclose(fp);
 	pthread_mutex_lock(&mutex_cow);
+        fp=fopen("home/jtpaulo/holey/logs/readslave","a");
+        fprintf(fp,"depois lock %llu size %d\n",offset,count);
+        fclose(fp);
+
 
 	done=0;
 
 	while(count>0) {
-		int cursor=offset&OFFMASK;
+		uint64_t cursor=offset&OFFMASK;
 		int bcount=offset+count > cursor+BLKSIZE ?
 						cursor+BLKSIZE-offset : count;
 
-		block_t id=cursor|fd;
+                //temp
+                //int bcount=count;
 
-		int src;
+		block_t id=cursor|fd;
+                int src;
+                fp=fopen("home/jtpaulo/holey/logs/readslave","a");
+                fprintf(fp,"offset %llu count %d cursor %llu bcount %d\n",offset,count,cursor,bcount);
+                fclose(fp);
+     
+
+		
 		if (test(id)) {
+                        fp=fopen("home/jtpaulo/holey/logs/readslave","a");
+                        fprintf(fp,"if test %llu size %d\n",offset,count);
+                        fclose(fp);
 			src=herd[fd].snapshot;
 			st_r_stab_blks++;
 		} else {
+                        fp=fopen("home/jtpaulo/holey/logs/readslave","a");
+                        fprintf(fp,"else %llu size %d\n",offset,count);
+                        fclose(fp);
 			src=herd[fd].storage;
 			st_r_reg_blks++;
 		}
 		
+                fp=fopen("home/jtpaulo/holey/logs/readslave","a");
+                fprintf(fp,"antes agenda %llu size %d\n",offset,count);
+                fclose(fp);
                 holey_aio_read(aio, src, bcount, offset, (char*) data, cb, id1, sector, private);
                 //DUVIDA aqui sector ta bem??
                 //vai ser usado no callback mas não quer dizer que seja o correcto mas acho que é o que queremos responder à VM...	
 		//pread(src, data, bcount, offset);
 
-
+                fp=fopen("home/jtpaulo/holey/logs/readslave","a");
+                fprintf(fp,"depois agenda %llu size %d\n",offset,count);
+                fclose(fp);
 		offset+=bcount;
 		count-=bcount;
 		data+=bcount;
 		done+=bcount;
 	}
 
+        fp=fopen("home/jtpaulo/holey/logs/readslave","a");
+        fprintf(fp,"antes unlock %llu size %d\n",offset,count);
+        fclose(fp);
 	pthread_mutex_unlock(&mutex_cow);
 
+
+        fp=fopen("home/jtpaulo/holey/logs/readslave","a");
+        fprintf(fp,"fim %llu size %d\n",offset,count);
+        fclose(fp);
 	return done;
 }
 

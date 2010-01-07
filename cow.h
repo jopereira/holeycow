@@ -26,7 +26,7 @@
 #define HOLEY_SERVER_STATUS_SLAVE 1
 #define HOLEY_SERVER_STATUS_MASTER 2
 
-#define FDBITS 14
+#define FDBITS 12
 #define FDMASK ((1<<FDBITS)-1)
 #define OFFMASK (~((1<<FDBITS)-1))
 

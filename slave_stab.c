@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 /* Circular buffer with 2 tails. Invariant: sn <= rn */
+//TODO mudei aqui de block_t para int porque block_t agora e uint64_t
 static block_t* buffer;
 static int max, h;		/* capacity and head */
 static int st, sn;		/* sender tail and size */
@@ -60,7 +61,7 @@ static void* receiver_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-		size=receive(buffer+h, size*sizeof(int));
+		size=receive(buffer+h, size*sizeof(uint64_t));
 	
 
 		if(size == 0) {		/* closed socket */
@@ -145,7 +146,7 @@ int slave_stab(int s, int sz, callback_t cb) {
 	int i, id;
 
 	max=sz;
-	buffer=(int*)calloc(sizeof(int), max);
+	buffer=(uint64_t*)calloc(sizeof(uint64_t), max);
 
 	callback=cb;
 
