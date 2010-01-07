@@ -1,32 +1,74 @@
+XEN_ROOT = ../../..
+include $(XEN_ROOT)/tools/Rules.mk
 
-CC			= gcc
-LDFLAGS = -L. -lholey -lpthread 
-CFLAGS 	= -g -fPIC
-OBJS		= slave_stab.o master_stab.o holeycow.o mytime.o
-LIBS		=	libholey.so
+IBIN         = blktapctrl tapdisk
+QCOW_UTIL    = img2qcow qcow2raw qcow-create
+LIBAIO_DIR   = ../../libaio/src
 
-all: master slave
+CFLAGS   += -Werror
+CFLAGS   += -Wno-unused
+CFLAGS   += -I../lib
+CFLAGS   += $(CFLAGS_libxenctrl)
+CFLAGS   += $(CFLAGS_libxenstore)
+CFLAGS   += -I $(LIBAIO_DIR)
+CFLAGS   += -D_GNU_SOURCE
+#TODO chnaged here
+CFLAGS   += `pkg-config --libs --cflags glib-2.0`
+CFLAGS   += -lpthread
+CFLAGS   += `pkg-config openssl --libs`
 
-master: master_main.o workload.o $(LIBS)
-	$(CC) -o $@ $< workload.o $(LDFLAGS)
+# Get gcc to generate the dependencies for us.
+CFLAGS   += -Wp,-MD,.$(@F).d
+DEPS      = .*.d
 
-slave: slave_main.o workload.o $(LIBS)
-	$(CC) -o $@ $< workload.o $(LDFLAGS)
+ifeq ($(shell . ./check_gcrypt),"yes")
+CFLAGS += -DUSE_GCRYPT
+CRYPT_LIB := -lgcrypt
+else
+CRYPT_LIB := -lcrypto
+$(warning *** libgcrypt not installed: falling back to libcrypto ***)
+endif
 
-libholey.so: $(OBJS)
-	$(CC) -shared $(OBJS) -o $@
+LDFLAGS_blktapctrl := $(LDFLAGS_libxenctrl) $(LDFLAGS_libxenstore) -L../lib -lblktap
+LDFLAGS_img := $(LIBAIO_DIR)/libaio.a $(CRYPT_LIB) -lpthread -lz
 
-test: master slave clean-tests
-	mkdir data
-	mkdir cow
-	dd if=/dev/zero of=data/volume bs=16 count=1000
-	LD_LIBRARY_PATH=$(LD_LIBRARY_PATH):. ./master 1 data/volume &
-	sleep 1
-	LD_LIBRARY_PATH=$(LD_LIBRARY_PATH):. ./slave 127.0.0.1 data/volume cow
+BLK-OBJS-y  := block-aio.o
+#TODO changed here
+BLK-OBJS-y  += block-holey.o
+BLK-OBJS-y  += block-els.o
+BLK-OBJS-y  += block-sync.o
+BLK-OBJS-y  += block-vmdk.o
+BLK-OBJS-y  += block-ram.o
+BLK-OBJS-y  += block-qcow.o
+BLK-OBJS-y  += block-qcow2.o
+BLK-OBJS-y  += aes.o
+BLK-OBJS-y  += tapaio.o
+BLK-OBJS-y  += holeyaio.o
+BLK-OBJS-$(CONFIG_Linux) += blk_linux.o
 
-clean-tests:
-	rm -rf data cow
+BLKTAB-OBJS-y := blktapctrl.o
+BLKTAB-OBJS-$(CONFIG_Linux) += blktapctrl_linux.o
 
-clean: clean-tests
-	rm -f *.o master slave libholey.so *.cow *~
+all: $(IBIN) qcow-util
 
+blktapctrl: $(BLKTAB-OBJS-y)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDFLAGS_blktapctrl)
+
+tapdisk: tapdisk.o $(BLK-OBJS-y)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDFLAGS_img)
+
+.PHONY: qcow-util
+qcow-util: img2qcow qcow2raw qcow-create
+
+img2qcow qcow2raw qcow-create: %: %.o $(BLK-OBJS-y)
+	$(CC) $(CFLAGS) -o $* $^ $(LDFLAGS) $(LDFLAGS_img)
+
+install: all
+	$(INSTALL_PROG) $(IBIN) $(QCOW_UTIL) $(VHD_UTIL) $(DESTDIR)$(SBINDIR)
+
+clean:
+	rm -rf *.o *~ $(DEPS) xen TAGS $(IBIN) $(LIB) $(QCOW_UTIL) $(VHD_UTIL)
+
+.PHONY: clean install
+
+-include $(DEPS)
