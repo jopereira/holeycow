@@ -1,0 +1,14 @@
+HoleyCoW allows replicated shared-nothing software (e.g. a DBMS server)
+to be used to build a shared-storage cluster.
+
+For more information visit the http://holeycow.org.
+
+The HoleyCoW project is a reasearch project at the Computer Science and
+Technology Center at the University of Minho, by José Pereira, Luís Soares
+and Luciano Rocha. Work leading to this project was partially funded by
+FEDER through FCT by project Pastramy (PTDC/EIA/72405/2006), Bolsa de
+Doutoramento (SFRH/BD/31114/2006), and EuroTux Informática S.A. We also
+thank all the GORDA team at the U. Minho.
+
+HoleyCoW is distributed under the GNU General Public License v2 or greater.
+See COPYING file for details.
