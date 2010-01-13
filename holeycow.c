@@ -50,6 +50,18 @@ static int ncow;
 static int slaveid;
 static char* cow_basedir;
 
+
+struct ctap{
+
+    void* data;
+    holey_aio_context_t *aio; 
+    td_callback_t *cb; 
+    int id; 
+    uint64_t sector; 
+    void *private;
+        
+};
+
 struct {
 	/* common */
 	int storage;
@@ -57,7 +69,9 @@ struct {
 	int *bitmap;
 
 	/* master variables */
-	void **cache;
+        //void **cache;
+        struct ctap *cache;
+ 
 
 	/* slave variables */
 	int snapshot;
@@ -147,16 +161,20 @@ static void master_cb(block_t id) {
 	offset=id&OFFMASK;
 	boff=offset>>FDBITS;
 
+        fp=fopen("home/jtpaulo/holey/logs/cbmaster","a");
+        fprintf(fp,"%d %llu\n",herd[fd].cache[boff].id, herd[fd].cache[boff].sector);
+        fclose(fp);
         
         //TODO substituir com o holey_aio_write...
-        //holey_aio_write(aio, herd[fd].storage, BLKSIZE, offset, herd[fd].cache[boff], cb, id, sector, private,boff,fd,1);
-	pwrite(herd[fd].storage, herd[fd].cache[boff], BLKSIZE, offset);
-        //cb(dd, (ret < 0) ? ret: 0, sector, nb_sectors, id, private);
+        holey_aio_write(herd[fd].cache[boff].aio, herd[fd].storage, BLKSIZE, offset, herd[fd].cache[boff].data, *herd[fd].cache[boff].cb, herd[fd].cache[boff].id, herd[fd].cache[boff].sector, herd[fd].cache[boff].private,0,0,0);
+	//pwrite(herd[fd].storage, herd[fd].cache[boff].data, BLKSIZE, offset);
+        //cb(dd, (ret < 0) ? ret: 0, herd[fd].cache[boff].sector, nb_sectors, id, private);
 
 
         //TODO código a ser colado nos callbacks ver os locks....
-        free(herd[fd].cache[boff]);
-        herd[fd].cache[boff]=NULL;
+        //AHHHHHH apagar este free...
+        //free(herd[fd].cache[boff].data);
+        //herd[fd].cache[boff].data=NULL;
         st_w_stab_blks++;
 
 	pthread_mutex_unlock(&mutex_cow);
@@ -205,7 +223,7 @@ static int master_open(char* path, int flags) {
 		lseek(herd[mycow].storage, 0, SEEK_SET);
 
 		herd[mycow].bitmap=(int*)calloc(maxblk/8+sizeof(int),1);
-		herd[mycow].cache=(void**)calloc(maxblk,sizeof(void*));
+		herd[mycow].cache=(struct ctap*)calloc(maxblk,sizeof(struct ctap));
 
 		res = mycow;
 	}
@@ -255,22 +273,79 @@ static int master_pwrite(int fd, void* data, size_t count, off_t offset, holey_a
                         fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
                         fprintf(fp,"else...\n");
                         fclose(fp);
-			if (herd[fd].cache[boff]==NULL) {
-				herd[fd].cache[boff]=malloc(BLKSIZE);
+			if (herd[fd].cache[boff].data==NULL) {
+				herd[fd].cache[boff].data=malloc(BLKSIZE);
 				if (bcount!=BLKSIZE) {
 					st_frag_blks++;
                                         //deixei sincrono
-					pread(herd[fd].storage, herd[fd].cache[boff], BLKSIZE, cursor);
+					pread(herd[fd].storage, herd[fd].cache[boff].data, BLKSIZE, cursor);
 				}
+
+                                herd[fd].cache[boff].id = id1;
+                                herd[fd].cache[boff].sector = sector;
+
+                                if(aio==NULL){
+
                                 fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
-                                fprintf(fp,"antes add block\n");
+                                fprintf(fp,"e nulo aio\n");
                                 fclose(fp);
+ 
+                                } 
+                                if(private==NULL){
+
+                                   fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                                   fprintf(fp,"e nulo private\n");
+                                   fclose(fp);
+                                } 
+
+                                fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                                fprintf(fp,"nao eram nulos...\n");
+                                fclose(fp);
+
+                                //herd[fd].cache[boff].aio = malloc(sizeof(aio));
+                                //herd[fd].cache[boff].private = malloc(sizeof(private));
+                                
+                                herd[fd].cache[boff].aio = aio;
+                                herd[fd].cache[boff].private = private;
+                                
+                                //memcpy(herd[fd].cache[boff].aio, aio, sizeof(aio));
+                                //memcpy(herd[fd].cache[boff].private, private, sizeof(private));
+
+                                if(herd[fd].cache[boff].aio==NULL){
+
+                                fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                                fprintf(fp,"e nulo herd aio\n");
+                                fclose(fp);
+ 
+                                } 
+                                if(herd[fd].cache[boff].private==NULL){
+
+                                   fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                                   fprintf(fp,"e nulo herd private\n");
+                                   fclose(fp);
+                                } 
+
+                                fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                                fprintf(fp,"nao eram nulos os segundos...\n");
+                                fclose(fp);
+
+                                herd[fd].cache[boff].cb = &cb;
+                                fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
+                                fprintf(fp,"antes add block%d %llu\n",herd[fd].cache[boff].id,herd[fd].cache[boff].sector);
+                                fclose(fp);
+
+
+             
 				add_block(id);
                                 fp=fopen("home/jtpaulo/holey/logs/writemaster","a");
                                 fprintf(fp,"add block\n");
                                 fclose(fp);
 			}
-			memcpy(herd[fd].cache[boff]+(offset-cursor), data, bcount);
+			memcpy(herd[fd].cache[boff].data+(offset-cursor), data, bcount);
+                        fp=fopen("home/jtpaulo/holey/logs/vars","a");
+                        fprintf(fp,"buff %s\n\n size %d offset %llu",(char *)data,bcount,offset);
+                        fclose(fp);
+
 		}
 
 		offset+=bcount;
@@ -323,15 +398,15 @@ static int master_pread(int fd, void* data, size_t count, off_t offset, holey_ai
                 //temp
                 //bcount=count;
 
-		if (herd[fd].cache[boff]!=NULL) {
+		if (herd[fd].cache[boff].data!=NULL) {
 
-                        fp=fopen("home/jtpaulo/holey/logs/readmaster","a");
+                        fp=fopen("home/jtpaulo/holey/logs/erro","a");
                         fprintf(fp,"cache dif null %llu size %d\n",offset,count);
                         fclose(fp);
 			st_r_stab_blks++;
                         //DUVIDA o que aqui faz é se cache nao ta vazia le o resultado daqui...
                         //TODO caso isto aconteça tenho de chamar o callback na mesma aqui porque isto nao vai pro aio...
-			memcpy(data, herd[fd].cache[boff]+(offset-cursor), bcount);
+			memcpy(data, herd[fd].cache[boff].data+(offset-cursor), bcount);
 		} else {
                         fp=fopen("home/jtpaulo/holey/logs/readmaster","a");
                         fprintf(fp,"cache nula %llu size %d\n",offset,count);
