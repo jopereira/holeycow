@@ -91,8 +91,10 @@ static void* sender_thread(void* p) {
                 fprintf(fp,"tou na thread sender depois send!!!!!\n");
                 fclose(fp);
 
-
-		printf("MASTER: stability sent %d blocks\n", size);
+                fp=fopen("home/jtpaulo/holey/logs/stabilitymaster","a");
+                fprintf(fp,"MASTER: stability sent %d blocks\n", size);
+                fclose(fp);
+		
 
 		usleep(1000);
 
@@ -113,6 +115,7 @@ static int receive(int id) {
 }
 
 static void* receiver_thread(void* p) {
+        FILE* fp;
 	int id=(int)p;
 
 	while(1) {
@@ -129,8 +132,10 @@ static void* receiver_thread(void* p) {
 				size=sizes[i];
 		}
 
-		printf("MASTER: stability received %d blocks\n", size);
-
+                fp=fopen("home/jtpaulo/holey/logs/recvmaster","a");
+                fprintf(fp,"MASTER: stability received %d blocks\n", size);
+                fclose(fp);
+                
 		if (size>0) {
 			for(i=0;i<slaves;i++)
 				sizes[i]-=size;
@@ -228,7 +233,7 @@ int add_block(block_t id) {
         FILE *fp;
 
         fp=fopen("home/jtpaulo/holey/logs/addblock","a");
-        fprintf(fp,"tou no add_block\n");
+        fprintf(fp,"tou no add_block %llu\n",id);
         fclose(fp);
         
 
@@ -249,7 +254,7 @@ int add_block(block_t id) {
 	pthread_mutex_unlock(&mux);
 
         fp=fopen("home/jtpaulo/holey/logs/addblock","a");
-        fprintf(fp,"tou no add_block antes perror\n");
+        fprintf(fp,"tou no add_block antes perror %llu\n",id);
         fclose(fp);
         perror("");
 

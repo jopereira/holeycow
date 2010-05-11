@@ -37,7 +37,7 @@
 extern void (*holey_start)(int);
 extern int (*holey_open)(char*, int);
 extern int (*holey_close)(int);
-extern int (*holey_pwrite)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback_t, int, uint64_t, void*);
+extern int (*holey_pwrite)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback_t, int, uint64_t, int, void*,struct disk_driver**,int *);
 extern int (*holey_pread)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback_t, int, uint64_t, void*);
 extern int (*holey_fsync)(int);
 extern off_t (*holey_lseek)(int, off_t, int);

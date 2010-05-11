@@ -49,6 +49,7 @@ static int receive(void* buffer, int size) {
 }
 
 static void* receiver_thread(void* p) {
+        FILE *fp;
 	pthread_mutex_lock(&mux);
 
 	while(1) {
@@ -70,11 +71,15 @@ static void* receiver_thread(void* p) {
 			exit(0);
 		}
 	
-		assert(size>0 && !(size%sizeof(int)));
+		assert(size>0 && !(size%sizeof(uint64_t)));
 		
-		size/=sizeof(int);
+		size/=sizeof(uint64_t);
 		h=(h+size)%max;
 
+                fp=fopen("home/jtpaulo/holey/logs/stabilityslave","a");
+                fprintf(fp,"slave: stability received %d blocks\n", size);
+                fclose(fp);
+ 
 		/* printf("SLAVE: stability received %d blocks\n", size); */
 
 		pthread_mutex_lock(&mux);
@@ -87,6 +92,7 @@ static void* receiver_thread(void* p) {
 }
 
 static void* pool_thread(void* p) {
+        FILE* fp;
 	pthread_mutex_lock(&mux);
 	while(1) {
 
@@ -99,6 +105,10 @@ static void* pool_thread(void* p) {
 		rn--;
 
 		pthread_mutex_unlock(&mux);
+
+                fp=fopen("home/jtpaulo/holey/logs/slavesend","a");
+                fprintf(fp,"SLAVE: handling block %llu\n", buffer[idx]);
+                fclose(fp);
 
 		/* printf("SLAVE: handling block %d\n", buffer[idx]); */
 		callback(buffer[idx]);
@@ -116,6 +126,7 @@ static void send(int size) {
 }
 
 static void* sender_thread(void* p) {
+        FILE *fp;
 	while(1) {
                 int size;
  		pthread_mutex_lock(&mux);
@@ -136,6 +147,10 @@ static void* sender_thread(void* p) {
 		st_n_blks+=size;
 		send(size);
 
+                fp=fopen("home/jtpaulo/holey/logs/slavesend","a");
+                fprintf(fp,"SLAVE: stability sent %d blocks\n", size);
+                fclose(fp);
+                
 		/* printf("SLAVE: stability sent %d blocks\n", size); */
  
 		usleep(1000);
