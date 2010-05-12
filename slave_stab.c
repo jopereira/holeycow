@@ -23,10 +23,11 @@
 #include <stdio.h>
 
 #include "stability.h"
+#include "defs.h"
 #include <unistd.h>
 
 /* Circular buffer with 2 tails. Invariant: sn <= rn */
-//TODO mudei aqui de block_t para int porque block_t agora e uint64_t
+//changed here block_t now is uint64_t
 static block_t* buffer;
 static int max, h;		/* capacity and head */
 static int st, sn;		/* sender tail and size */
@@ -76,12 +77,10 @@ static void* receiver_thread(void* p) {
 		size/=sizeof(uint64_t);
 		h=(h+size)%max;
 
-                fp=fopen("home/jtpaulo/holey/logs/stabilityslave","a");
+                fp=fopen(HLOG,"a");
                 fprintf(fp,"slave: stability received %d blocks\n", size);
                 fclose(fp);
  
-		/* printf("SLAVE: stability received %d blocks\n", size); */
-
 		pthread_mutex_lock(&mux);
 
 		sn+=size;
@@ -106,11 +105,10 @@ static void* pool_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-                fp=fopen("home/jtpaulo/holey/logs/slavesend","a");
+                fp=fopen(HLOG,"a");
                 fprintf(fp,"SLAVE: handling block %llu\n", buffer[idx]);
                 fclose(fp);
 
-		/* printf("SLAVE: handling block %d\n", buffer[idx]); */
 		callback(buffer[idx]);
 
 		pthread_mutex_lock(&mux);
@@ -147,11 +145,11 @@ static void* sender_thread(void* p) {
 		st_n_blks+=size;
 		send(size);
 
-                fp=fopen("home/jtpaulo/holey/logs/slavesend","a");
+                fp=fopen(HLOG,"a");
                 fprintf(fp,"SLAVE: stability sent %d blocks\n", size);
                 fclose(fp);
                 
-		/* printf("SLAVE: stability sent %d blocks\n", size); */
+		
  
 		usleep(1000);
 	}

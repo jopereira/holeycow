@@ -7,10 +7,9 @@ from xen.xend.XendLogging import log
 phantomDev = 0;
 phantomId = 0;
 
-#TODO changed here
+#changed here
 blktap_disk_types = [
     'aio',
-    'els',
     'holey',
     'sync',
     'vmdk',

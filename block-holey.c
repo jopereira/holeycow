@@ -46,10 +46,7 @@
 #include "blk.h"
 
 #include "holeycow.c"
-//#include "cow.h"
-//#include "stability.h"
-//#include "defs.h"
-//#include "mytime.h"
+
 
 #define MAX_AIO_REQS (MAX_REQUESTS * MAX_SEGMENTS_PER_REQ)
 
@@ -59,7 +56,6 @@
 #endif
 
 //debug
-FILE *stream2;
 FILE *stream1;
 int firstread;
 
@@ -130,19 +126,16 @@ static inline void init_fds(struct disk_driver *dd)
 }
 
 
-//OPEN normal faz so o holy_open na primeira leitura....
+//OPEN holy_open is only called in the first read
 /* Open the disk file and initialize aio state. */
 static int tdholey_open (struct disk_driver *dd, const char *name, td_flag_t flags)
 {
 	int i, fd, ret = 0, o_flags;
-        //int master;
-        FILE *fp;
         char realname[100];
 	struct td_state    *s   = dd->td_state;
 	struct tdholey_state *prv = (struct tdholey_state *)dd->private;
 
-        stream1 = freopen( "/home/jtpaulo/holey/logs/stdout", "a+", stdout);
-        stream2 = freopen( "/home/jtpaulo/holey/logs/stderr", "a+", stderr ); 
+        stream1 = freopen( HSTDERR, "a+", stderr ); 
         firstread=0;      
  
 
@@ -152,32 +145,6 @@ static int tdholey_open (struct disk_driver *dd, const char *name, td_flag_t fla
 	ret = holey_aio_init(&prv->aio, 0, MAX_AIO_REQS);
 	if (ret != 0)
 		return ret;
-
-        fp=fopen("/home/jtpaulo/holey/logs/open","a");
-        fprintf(fp,"antes ver master\n");
-        fclose(fp);
-        
-        /*
-        master = atoi(&name[strlen(name)-1]);
-
-        fp=fopen("home/jtpaulo/holey/logs/open","a");
-        fprintf(fp,"master = %d\n",master);
-        fclose(fp);
-
-        
-        //Holey initialization......
-        if(master==1){
-          holey_init(HOLEY_SERVER_STATUS_MASTER, NULL, 1, NULL);
-        }
-        else{
-          //holey_init(HOLEY_SERVER_STATUS_SLAVE, "127.0.0.1", 1000, "/storage/jtpaulo-msc/cow");
-        }
-
-        fp=fopen("home/jtpaulo/holey/logs/open","a");
-        fprintf(fp,"depois init %d\n",master);
-        fclose(fp);
-
-        */
 
         strcpy(realname,name);
         realname[strlen(realname)-1]='\0';
@@ -208,24 +175,8 @@ static int tdholey_open (struct disk_driver *dd, const char *name, td_flag_t fla
         strcpy(prv->name,name);
 
 	init_fds(dd); 
-        //Duvida get_image_info_sera necessário???
-        //devo ter de mudar aqui.... abir storage de master ou slave consoante....
-        fp=fopen("/home/jtpaulo/holey/logs/open","a");
-        fprintf(fp,"antes get_image\n");
-        fclose(fp);
-        
-        //if(master==1){
-	  ret = get_image_info(s, fd);
-        //}
-        //else{
-          //DUVIDA isto estará bem??? ou deveria abrir da storage na mesma???
-          //ret = get_image_info(s, herd[fd].snapshot);
-        //}
-
-        fp=fopen("/home/jtpaulo/holey/logs/open","a");
-        fprintf(fp,"fim get_image\n");
-        fclose(fp);
-
+        ret = get_image_info(s, fd);
+       
 done:
 	return ret;	
 }
@@ -241,29 +192,20 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
         int master, o_flags;
         char realname[100];
         int ret;
-        FILE *fp;       
 
         master = atoi(&prv->name[strlen(prv->name)-1]);
 
         if(firstread==0){        
 
           
-          fp=fopen("/home/jtpaulo/holey/logs/firstread","a");
-          fprintf(fp,"master = %d\n",master);
-          fclose(fp);
-
-        
+                  
           //Holey initialization......
           if(master==1){
-            holey_init(HOLEY_SERVER_STATUS_MASTER, NULL, 1, NULL);
+            holey_init(HOLEY_SERVER_STATUS_MASTER, NULL, NSLAVES, NULL);
           }
           else{
-            holey_init(HOLEY_SERVER_STATUS_SLAVE, "127.0.0.1", 1000, "/storage/jtpaulo-msc/cow");
+            holey_init(HOLEY_SERVER_STATUS_SLAVE, MASTER_ADD, 1000, COW_DIR);
           }
-
-          fp=fopen("home/jtpaulo/holey/logs/firstread","a");
-          fprintf(fp,"depois init %d\n",master);
-          fclose(fp);
 
           strcpy(realname,prv->name);
           realname[strlen(realname)-1]='\0';
@@ -292,32 +234,16 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
           firstread=1;
         }
         
- 
-        fp=fopen("home/jtpaulo/holey/logs/read","a");
-        fprintf(fp,"read... %d offset %llu size %d %d %llu\n",master,offset,size,id,sector);
-        fclose(fp);
-
-
-       
-        
         ret = holey_pread(prv->fd,buf,size,offset,&prv->aio,cb,id,sector,private);
         if (ret != size) {
 			ret = 0 - errno;
 	} else {
 			ret = 1;
 	} 
-	
-        
-
-        fp=fopen("home/jtpaulo/holey/logs/read","a");
-        fprintf(fp,"read... %d offset %llu size %d AGENDADO %d %llu ret %d\n",master,offset,size,id,sector,ret);
-        fclose(fp);
         
 
         return cb(dd, (ret < 0) ? ret: 0, sector, nb_sectors, id, private);
 
-	//return holey_aio_read(&prv->aio, prv->fd, size, offset, buf, 
-		//cb, id, sector, private);
 }
 			
 static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
@@ -329,7 +255,6 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
 	struct   tdholey_state *prv = (struct tdholey_state *)dd->private;
 	int      size    = nb_sectors * s->sector_size;
 	uint64_t offset  = sector * (uint64_t)s->sector_size;
-        FILE *fp;
         int master;  
         int ret;     
         int wait =0; 
@@ -344,11 +269,6 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
 
         master = atoi(&prv->name[strlen(prv->name)-1]);
 
-        fp=fopen("home/jtpaulo/holey/logs/write","a");
-        fprintf(fp,"write... %d offset %llu size %d %d %llu\n",master,offset,size,id,sector);
-        fclose(fp);
-       
-
         ret = holey_pwrite(prv->fd,buf,size,offset,&prv->aio,cb,id,sector,nb_sectors,private,aux,&wait);
         if (ret != size) {
 			ret = 0 - errno;
@@ -360,23 +280,12 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
         
         if(wait==1){
 
-          fp=fopen("home/jtpaulo/holey/logs/writecallback","a");
-          fprintf(fp,"antes bloquear era 1 write... %d offset %llu size %d AGENDADo %d %llu rest%d\n",master,offset,size,id,sector,ret);
-          fclose(fp);
-
-          
-          
-          
+         
           pthread_cond_wait(&writecomp, &writemutex);
  
 
           pthread_mutex_unlock(&writemutex);
 
-          fp=fopen("home/jtpaulo/holey/logs/writecallback","a");
-          fprintf(fp,"sai wait era 1 write... %d offset %llu size %d AGENDADo %d %llu ret %d boff %llu \n",master,offset,size,id,sector,ret,boff);
-          fclose(fp);
-          
-          
 
           ret = pwrite(herd.storage, herd.cache[boff].data, BLKSIZE, offset);
           if (ret != size) {
@@ -385,14 +294,9 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
 			ret = 1;
 	  } 
 	  
-          fp=fopen("home/jtpaulo/holey/logs/writecallback","a");
-          fprintf(fp,"done era 1 write... %d offset %llu size %d AGENDADo %d %llu ret %d\n",master,offset,size,id,sector,ret);
-          fclose(fp);
-          
 
          }
 
-        //TODO alterar para assync
         ret = cb(dd, (ret < 0) ? ret: 0, sector, nb_sectors, id, private);
 
         if(master ==1){
@@ -401,32 +305,19 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
         }
 
         if(wait==1){
-
-           fp=fopen("home/jtpaulo/holey/logs/writecallback","a");
-          fprintf(fp,"antes de fazer free... %d offset %llu size %d AGENDADo %d %llu ret %d\n",master,offset,size,id,sector,ret);
-          fclose(fp);
-          
-          //TODO código a ser colado nos callbacks ver os locks....
-          //free(herd.cache[boff].data);
+   
           herd.cache[boff].data=NULL;
           st_w_stab_blks++;
 
         }
  
-        fp=fopen("home/jtpaulo/holey/logs/write","a");
-        fprintf(fp,"write... %d offset %llu size %d AGENDADo %d %llu\n",master,offset,size,id,sector);
-        fclose(fp);
-        
 
-        //TODO alterar para assync
         return ret;
-	//return holey_aio_write(&prv->aio, prv->fd, size, offset, buf,
-		//cb, id, sector, private);
 }
 
 static int tdholey_submit(struct disk_driver *dd)
 {
-        //TODO alterar para ssync
+        //when we change to assync
 	//struct tdholey_state *prv = (struct tdholey_state *)dd->private;
 
 	//return holey_aio_submit(&prv->aio);
@@ -446,14 +337,9 @@ static int tdholey_close(struct disk_driver *dd)
 
 static int tdholey_do_callbacks(struct disk_driver *dd, int sid)
 {
-        FILE* fp;
-	int i, nr_events, rsp = 0;
+        int i, nr_events, rsp = 0;
 	struct io_event *ep;
 	struct tdholey_state *prv = (struct tdholey_state *)dd->private;
-
-        fp=fopen("home/jtpaulo/holey/logs/aiolog","a");
-        fprintf(fp,"do callbacks...\n");
-        fclose(fp);
 
 	nr_events = holey_aio_get_events(&prv->aio.aio_ctx);
 repeat:
@@ -461,14 +347,8 @@ repeat:
 		struct iocb        *io  = ep->obj;
 		struct pending_aio *pio;
 		
-                
-
-		pio = &prv->aio.pending_aio[(long)io->data];
+        	pio = &prv->aio.pending_aio[(long)io->data];
  
-                fp=fopen("home/jtpaulo/holey/logs/callbacks","a");
-                fprintf(fp,"antes de chamar o calback %d %llu\n",pio->id,pio->sector);
-                fclose(fp);
-
               
 		rsp += pio->cb(dd, ep->res == io->u.c.nbytes ? 0 : 1,
 			       pio->sector, io->u.c.nbytes >> 9, 
@@ -476,11 +356,7 @@ repeat:
 
                 pthread_mutex_unlock(&mutex_cow);
 
-                fp=fopen("home/jtpaulo/holey/logs/callbacks","a");
-                fprintf(fp,"%d %llu\n",pio->id,pio->sector);
-                fclose(fp);
-
-		prv->aio.iocb_free[prv->aio.iocb_free_count++] = io;
+        	prv->aio.iocb_free[prv->aio.iocb_free_count++] = io;
 	}
 
 	if (nr_events) {
@@ -490,7 +366,7 @@ repeat:
 
 	holey_aio_continue(&prv->aio.aio_ctx);
       
-        //TODO alterar para assync
+        //when change assync
 	//return rsp;
         return 1;
 }

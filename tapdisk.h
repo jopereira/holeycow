@@ -158,8 +158,7 @@ extern struct tap_disk tapdisk_vmdk;
 extern struct tap_disk tapdisk_ram;
 extern struct tap_disk tapdisk_qcow;
 extern struct tap_disk tapdisk_qcow2;
-//TODO changed here
-extern struct tap_disk tapdisk_els;
+//changed here
 extern struct tap_disk tapdisk_holey;
 
 #define MAX_DISK_TYPES     20
@@ -172,9 +171,8 @@ extern struct tap_disk tapdisk_holey;
 #define DISK_TYPE_QCOW2    5
 #define DISK_TYPE_IOEMU    6
 
-//TODO changed here
-#define DISK_TYPE_ELS      7
-#define DISK_TYPE_HOLEY    8
+//changed here
+#define DISK_TYPE_HOLEY    7
 
 
 
@@ -189,18 +187,7 @@ static disk_info_t aio_disk = {
 #endif
 };
 
-//TODO added ver os 0
-static disk_info_t els_disk = {
-	DISK_TYPE_ELS,
-	"els disk (els)",
-	"els",
-	0,
-#ifdef TAPDISK
-	&tapdisk_els,
-#endif
-};
-
-//TODO added ver os 0
+//changed here
 static disk_info_t holey_disk = {
 	DISK_TYPE_HOLEY,
 	"holey disk (holey)",
@@ -272,7 +259,7 @@ static disk_info_t ioemu_disk = {
 };
 
 /*Main disk info array */
-//TODO added here
+//changed here
 static disk_info_t *dtypes[] = {
 	&aio_disk,
 	&sync_disk,
@@ -281,7 +268,6 @@ static disk_info_t *dtypes[] = {
 	&qcow_disk,
 	&qcow2_disk,
 	&ioemu_disk,
-        &els_disk,
         &holey_disk,
 };
 

@@ -12,10 +12,8 @@ CFLAGS   += $(CFLAGS_libxenctrl)
 CFLAGS   += $(CFLAGS_libxenstore)
 CFLAGS   += -I $(LIBAIO_DIR)
 CFLAGS   += -D_GNU_SOURCE
-#TODO chnaged here
-CFLAGS   += `pkg-config --libs --cflags glib-2.0`
+#changed here
 CFLAGS   += -lpthread
-CFLAGS   += `pkg-config openssl --libs`
 
 # Get gcc to generate the dependencies for us.
 CFLAGS   += -Wp,-MD,.$(@F).d
@@ -33,9 +31,8 @@ LDFLAGS_blktapctrl := $(LDFLAGS_libxenctrl) $(LDFLAGS_libxenstore) -L../lib -lbl
 LDFLAGS_img := $(LIBAIO_DIR)/libaio.a $(CRYPT_LIB) -lpthread -lz
 
 BLK-OBJS-y  := block-aio.o
-#TODO changed here
+# changed here
 BLK-OBJS-y  += block-holey.o
-BLK-OBJS-y  += block-els.o
 BLK-OBJS-y  += block-sync.o
 BLK-OBJS-y  += block-vmdk.o
 BLK-OBJS-y  += block-ram.o
@@ -44,7 +41,6 @@ BLK-OBJS-y  += block-qcow2.o
 BLK-OBJS-y  += aes.o
 BLK-OBJS-y  += tapaio.o
 BLK-OBJS-y  += holeyaio.o
-BLK-OBJS-y  += elsaio.o
 BLK-OBJS-y  += slave_stab.o master_stab.o mytime.o
 BLK-OBJS-$(CONFIG_Linux) += blk_linux.o
 

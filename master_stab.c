@@ -22,6 +22,7 @@
 #include <assert.h>
 #include <stdio.h>
 
+#include "defs.h"
 #include "stability.h"
 #include <unistd.h>
 
@@ -62,10 +63,7 @@ static void* sender_thread(void* p) {
         FILE *fp;     
  
 
-        fp=fopen("home/jtpaulo/holey/logs/addblock","a");
-        fprintf(fp,"tou na thread sender\n");
-        fclose(fp);
-	pthread_mutex_lock(&mux);
+        pthread_mutex_lock(&mux);
 
 	while(1) {
 
@@ -73,10 +71,7 @@ static void* sender_thread(void* p) {
 		while(sn==0)
 			pthread_cond_wait(&notempty, &mux);
 
-                fp=fopen("home/jtpaulo/holey/logs/addblock","a");
-                fprintf(fp,"tou na thread sender acordei!!!!!\n");
-                fclose(fp);
-
+                
 		size=sn>500?500:sn;
 		if (st+size>max)
 			size=max-st;
@@ -87,11 +82,7 @@ static void* sender_thread(void* p) {
 		st_n_msgs++;
 		send(buffer+st, size*sizeof(uint64_t));
 
-                fp=fopen("home/jtpaulo/holey/logs/addblock","a");
-                fprintf(fp,"tou na thread sender depois send!!!!!\n");
-                fclose(fp);
-
-                fp=fopen("home/jtpaulo/holey/logs/stabilitymaster","a");
+                fp=fopen(HLOG,"a");
                 fprintf(fp,"MASTER: stability sent %d blocks\n", size);
                 fclose(fp);
 		
@@ -106,7 +97,7 @@ static void* sender_thread(void* p) {
 }
 
 
-//TODO mudar aqui no receive...
+
 static int receive(int id) {
 	int result, r=0;
 	r=read(sock[id], &result, sizeof(result));
@@ -132,7 +123,7 @@ static void* receiver_thread(void* p) {
 				size=sizes[i];
 		}
 
-                fp=fopen("home/jtpaulo/holey/logs/recvmaster","a");
+                fp=fopen(HLOG,"a");
                 fprintf(fp,"MASTER: stability received %d blocks\n", size);
                 fclose(fp);
                 
@@ -150,13 +141,7 @@ static void* receiver_thread(void* p) {
 }
 
 static void* pool_thread(void* p) {
-        FILE* fp;
-
-        fp=fopen("home/jtpaulo/holey/logs/poolthread","a");
-        fprintf(fp,"tou na pool thread,,!!!!!\n");
-        fclose(fp);
-
-
+       
 	pthread_mutex_lock(&mux);
 	while(1) {
 
@@ -165,11 +150,7 @@ static void* pool_thread(void* p) {
 			pthread_cond_wait(&ready, &mux);
 
 
-                fp=fopen("home/jtpaulo/holey/logs/poolthread","a");
-                fprintf(fp,"tou na pool thread acordei!!!!!\n");
-                fclose(fp);
-                
-         
+                      
 		idx=rt;
 		rt=(rt+1)%max;
 		rn--;
@@ -232,11 +213,7 @@ int add_block(block_t id) {
 	int result;
         FILE *fp;
 
-        fp=fopen("home/jtpaulo/holey/logs/addblock","a");
-        fprintf(fp,"tou no add_block %llu\n",id);
-        fclose(fp);
-        
-
+       
 	pthread_mutex_lock(&mux);
 
 	assert(rn!=max);
@@ -253,12 +230,7 @@ int add_block(block_t id) {
 
 	pthread_mutex_unlock(&mux);
 
-        fp=fopen("home/jtpaulo/holey/logs/addblock","a");
-        fprintf(fp,"tou no add_block antes perror %llu\n",id);
-        fclose(fp);
-        perror("");
-
-	return result;
+       	return result;
 }
 
 void wait_sync(int dump) {

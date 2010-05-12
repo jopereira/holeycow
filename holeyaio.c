@@ -310,7 +310,7 @@ int holey_aio_read(holey_aio_context_t *ctx, int fd, int size,
 	return 0;
 }
 
-//TODO changed here...
+//changed here...
 int holey_aio_write(holey_aio_context_t *ctx, int fd, int size,
 		uint64_t offset, char *buf, td_callback_t cb,
 		int id, uint64_t sector, void *private, uint64_t boff,int fd1,int rc)
@@ -318,35 +318,11 @@ int holey_aio_write(holey_aio_context_t *ctx, int fd, int size,
 	struct	 iocb *io;
 	struct	 pending_aio *pio;
 	long	 ioidx;
-        FILE *fp;
-
+        
 	if (ctx->iocb_free_count == 0)
 		return -ENOMEM;
 
 	io = ctx->iocb_free[--ctx->iocb_free_count];
-
-        perror("");
-
-        fp=fopen("home/jtpaulo/holey/logs/aiolog","a");
-        fprintf(fp,"tou no write!!!!! %d %llu \n",id,sector);
-        fclose(fp);
-
-        if(ctx==NULL){
-
-        fp=fopen("home/jtpaulo/holey/logs/aiolog","a");
-        fprintf(fp,"e nulo aio\n");
-        fclose(fp);
-
-
-        } 
-        if(private==NULL){
-
-        fp=fopen("home/jtpaulo/holey/logs/aiolog","a");
-        fprintf(fp,"e nulo private\n");
-        fclose(fp);
-
-
-        } 
 
 	ioidx = IOCB_IDX(ctx, io);
 	pio = &ctx->pending_aio[ioidx];
@@ -364,50 +340,21 @@ int holey_aio_write(holey_aio_context_t *ctx, int fd, int size,
 	io->data = (void *)ioidx;
 
 	ctx->iocb_queue[ctx->iocb_queued++] = io;
-
-        perror("pwrite... aio");
-
-        fp=fopen("home/jtpaulo/holey/logs/aiolog","a");
-        fprintf(fp,"antes return aio...\n");
-        fclose(fp);
-
-        fp=fopen("home/jtpaulo/holey/logs/vars","a");
-        fprintf(fp,"buff %s\n\n size %d offset %llu",buf,size,offset);
-        fclose(fp);
- 
+     
 	return 0;
 }
 
 int holey_aio_submit(holey_aio_context_t *ctx)
 {
-	int ret;
-        FILE* fp;
-
-        fp=fopen("home/jtpaulo/holey/logs/aiolog","a");
-        fprintf(fp,"comecar submit...\n");
-        fclose(fp);
-
-	if (!ctx->iocb_queued)
+	
+  	if (!ctx->iocb_queued)
 		return 0;
 
-	ret = io_submit(ctx->aio_ctx.aio_ctx, ctx->iocb_queued, ctx->iocb_queue);
+	io_submit(ctx->aio_ctx.aio_ctx, ctx->iocb_queued, ctx->iocb_queue);
 
 	/* XXX: TODO: Handle error conditions here. */
 
-        if(ret<0){
-          fp=fopen("home/jtpaulo/holey/logs/aiosubmit","a");
-          fprintf(fp,"deu eroo\n");
-          fclose(fp);
-          perror("aio submit");
- 
-        }
-
-        fp=fopen("home/jtpaulo/holey/logs/aiolog","a");
-        fprintf(fp,"fiz submit...\n");
-        fclose(fp);
-
-        perror("aio submit");
-	/* Success case: */
+  	/* Success case: */
 	ctx->iocb_queued = 0;
 
 	return 0;
