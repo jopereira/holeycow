@@ -17,12 +17,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#define HLOG "/home/jtpaulo/holey/logs/log"
-#define HSTDERR "/home/jtpaulo/holey/logs/stderr"
-#define NSLAVES 1
-#define MASTER_ADD "127.0.0.1"
-#define COW_DIR "/storage/jtpaulo-msc/cow"
-
 #ifndef __DEFS__
 #define __DEFS__
 
@@ -31,3 +25,8 @@
 #define BLKSIZE (4*1024)
 
 #endif
+
+char HLOG[40];
+char HSTDERR[40];
+
+

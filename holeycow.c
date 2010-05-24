@@ -206,13 +206,12 @@ static int master_open(char* path, int flags) {
 static int master_pwrite(int fde,void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector,int nb_sector, void* private, struct disk_driver **dd, int *wait) {
 
         int done;
-        FILE* fp;
         int ft;
         int res;
 
         *wait =0;
 
-	pthread_mutex_lock(&mutex_cow);
+      	pthread_mutex_lock(&mutex_cow);
 
         done=0;
 
@@ -263,6 +262,7 @@ static int master_pwrite(int fde,void* data, size_t count, off_t offset, holey_a
                 done+=bcount;
 	}
 
+     
      	return done;
 }
 
@@ -270,7 +270,7 @@ static int master_pread(int fde,void* data, size_t count, off_t offset, holey_ai
 
         int done;
         
-
+       
         pthread_mutex_lock(&mutex_cow);
 
         
@@ -304,7 +304,7 @@ static int master_pread(int fde,void* data, size_t count, off_t offset, holey_ai
 
        pthread_mutex_unlock(&mutex_cow);
 
-
+      
 	return done;
 }
 
@@ -427,9 +427,8 @@ static void slave_cb(block_t id) {
 
 static int slave_pwrite(int fde, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector,int nb_sectors, void* private, struct disk_driver** dd,int *wait) {
         int done;
-
-        FILE* fp;
-
+ 
+     
         *wait =0;
         
 	pthread_mutex_lock(&mutex_cow);
@@ -474,14 +473,15 @@ static int slave_pwrite(int fde, void* data, size_t count, off_t offset, holey_a
 
 	pthread_mutex_unlock(&mutex_cow);
 
-     
+      
 
 	return done;
 }
 
 static int slave_pread(int fde,void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
         int done;
-        
+
+         
         pthread_mutex_lock(&mutex_cow);
         
 
@@ -515,8 +515,8 @@ static int slave_pread(int fde,void* data, size_t count, off_t offset, holey_aio
 	}
 
        pthread_mutex_unlock(&mutex_cow);
-
-
+   
+     
        return done;
 }
 
@@ -756,4 +756,5 @@ int (*holey_pwrite)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback
 int (*holey_pread)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback_t, int, uint64_t, void*) = orig_pread;
 int (*holey_fsync)(int) = orig_fsync;
 off_t (*holey_lseek)(int, off_t, int) = orig_lseek;
+
 

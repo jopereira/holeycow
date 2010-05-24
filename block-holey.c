@@ -41,12 +41,19 @@
 #include <sys/statvfs.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+
+#include <stddef.h>
+#include <errno.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/types.h>
+
 #include "tapdisk.h"
 #include "holeyaio.h"
 #include "blk.h"
 
 #include "holeycow.c"
-
+#include "slave_master_def.h"
 
 #define MAX_AIO_REQS (MAX_REQUESTS * MAX_SEGMENTS_PER_REQ)
 
@@ -55,6 +62,8 @@
 #define O_LARGEFILE	0
 #endif
 
+
+int make_named_socket (const char *filename);
 //debug
 FILE *stream1;
 int firstread;
@@ -63,6 +72,7 @@ struct tdholey_state {
 	int fd;
 	holey_aio_context_t aio;
         char name[200];
+        int master;
 };
 
 
@@ -189,23 +199,97 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
 	struct   tdholey_state *prv = (struct tdholey_state *)dd->private;
 	int      size    = nb_sectors * s->sector_size;
 	uint64_t offset  = sector * (uint64_t)s->sector_size;
-        int master, o_flags;
+        int idvm,master, o_flags;
         char realname[100];
         int ret;
-
-        master = atoi(&prv->name[strlen(prv->name)-1]);
-
+       
+        
+ 
         if(firstread==0){        
 
+          char path[40];
+          int newsockfd;
+          int size = sizeof(int);
+          int bcount= 0;
+          int br= 0;
+
+          mkdir(VARPATH,S_IRWXU);
+
+          strcpy(path,VARPATH);
+          strcat(path,&prv->name[strlen(prv->name)-1]);
+
+          newsockfd = make_named_socket (path);
           
+          while (bcount < size) {             /* loop until full buffer */
+           if ((br= recv(newsockfd,(&(prv->master))+bcount,size-bcount,0)) > 0) {
+             //printf("no while bcount %d %d %d\n",bcount,br,size-bcount);
+             bcount += br;                /* increment byte counter */
+                                /* move buffer ptr for next read */
+           }
+           else if (br < 0)               /* signal an error to the caller */
+           DPRINTF("ERROR reading from socket");
+          } 
+
                   
           //Holey initialization......
-          if(master==1){
-            holey_init(HOLEY_SERVER_STATUS_MASTER, NULL, NSLAVES, NULL);
+          if(prv->master==1){
+
+            struct master_sts r;       
+            FILE *fp;
+
+            size = sizeof(r);
+            bcount= 0;
+            br= 0;
+            while (bcount < size) {             /* loop until full buffer */
+              if ((br= recv(newsockfd,(&r)+bcount,size-bcount,0)) > 0) {
+              //printf("no while bcount %d %d %d\n",bcount,br,size-bcount);
+              bcount += br;                /* increment byte counter */
+                                /* move buffer ptr for next read */
+            }
+            else if (br < 0)               /* signal an error to the caller */
+              perror("ERROR reading from socket");
+            } 
+     
+            fp = fopen(r.log,"a");
+            fprintf(fp,"r.master %d\nr.ncopiers %d\nr.log %s\nr.stderr %s\n",prv->master,r.ncopiers,r.log,r.stderr);
+            fclose(fp); 
+            
+            strcpy(HLOG,r.log);
+            strcpy(HSTDERR,r.stderr);
+
+            holey_init(HOLEY_SERVER_STATUS_MASTER, NULL, r.ncopiers, NULL);
           }
           else{
-            holey_init(HOLEY_SERVER_STATUS_SLAVE, MASTER_ADD, 1000, COW_DIR);
+
+            struct slave_sts r;       
+            FILE* fp;
+
+            size = sizeof(r);
+            bcount= 0;
+            br= 0;
+            while (bcount < size) {             /* loop until full buffer */
+              if ((br= recv(newsockfd,(&r)+bcount,size-bcount,0)) > 0) {
+                //printf("no while bcount %d %d %d\n",bcount,br,size-bcount);
+                bcount += br;                /* increment byte counter */
+                                /* move buffer ptr for next read */
+            }
+            else if (br < 0)               /* signal an error to the caller */
+              perror("ERROR reading from socket");
+            } 
+
+            fp = fopen(r.log,"a");
+            fprintf(fp,"r.master %d\nr.masteradd %s\nr.cowdir %s\nr.log %s\nr.stderr %s\n",prv->master,r.masteradd,r.cowdir,r.log,r.stderr);
+            fclose(fp);
+            
+            strcpy(HLOG,r.log);
+            strcpy(HSTDERR,r.stderr);
+
+
+            holey_init(HOLEY_SERVER_STATUS_SLAVE, r.masteradd, 1000, r.cowdir);
           }
+
+           close(newsockfd);
+           unlink(path);  
 
           strcpy(realname,prv->name);
           realname[strlen(realname)-1]='\0';
@@ -234,6 +318,7 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
           firstread=1;
         }
         
+
         ret = holey_pread(prv->fd,buf,size,offset,&prv->aio,cb,id,sector,private);
         if (ret != size) {
 			ret = 0 - errno;
@@ -255,7 +340,7 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
 	struct   tdholey_state *prv = (struct tdholey_state *)dd->private;
 	int      size    = nb_sectors * s->sector_size;
 	uint64_t offset  = sector * (uint64_t)s->sector_size;
-        int master;  
+        //int master;  
         int ret;     
         int wait =0; 
         uint64_t boff,cursor;
@@ -267,7 +352,7 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
         cursor=offset&OFFMASK;
         boff=cursor>>FDBITS;
 
-        master = atoi(&prv->name[strlen(prv->name)-1]);
+        //master = atoi(&prv->name[strlen(prv->name)-1]);
 
         ret = holey_pwrite(prv->fd,buf,size,offset,&prv->aio,cb,id,sector,nb_sectors,private,aux,&wait);
         if (ret != size) {
@@ -299,7 +384,7 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
 
         ret = cb(dd, (ret < 0) ? ret: 0, sector, nb_sectors, id, private);
 
-        if(master ==1){
+        if(prv->master ==1){
           pthread_mutex_unlock(&mutex_cow);
 
         }
@@ -394,3 +479,43 @@ struct tap_disk tapdisk_holey = {
 	.td_get_parent_id   = tdholey_get_parent_id,
 	.td_validate_parent = tdholey_validate_parent
 };
+
+/************************************* AUX function***********************/
+
+int make_named_socket (const char *filename)
+{
+  struct sockaddr_un name;
+  int sock;
+  size_t size;
+
+  /* Create the socket. */
+  
+  sock = socket (PF_UNIX, SOCK_DGRAM, 0);
+  if (sock < 0)
+    {
+      perror ("socket");
+      exit (EXIT_FAILURE);
+    }
+
+  /* Bind a name to the socket. */
+
+  name.sun_family = AF_FILE;
+  strcpy (name.sun_path, filename);
+
+  /* The size of the address is
+     the offset of the start of the filename,
+     plus its length,
+     plus one for the terminating null byte. */
+  size = (offsetof (struct sockaddr_un, sun_path)
+          + strlen (name.sun_path) + 1);
+
+  if (bind (sock, (struct sockaddr *) &name, size) < 0)
+    {
+      perror ("bind");
+      exit (EXIT_FAILURE);
+    }
+
+  return sock;
+}
+
+
