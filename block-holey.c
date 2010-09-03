@@ -1,8 +1,16 @@
 /* block-aio.c
  *
- * libaio-based raw disk implementation.
+ * Holeycow-xen
+ * (c) 2010 U. Minho. Written by J. Paulo
  *
+ * Based on:
+ *
+ * Holeycow-mysql
+ * (c) 2008 José Orlando Pereira, Luís Soares
+ * 
+ * blktap-xen
  * (c) 2006 Andrew Warfield and Julian Chesterfield
+ * 
  *
  * NB: This code is not thread-safe.
  *
@@ -296,7 +304,7 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
 
 
 	  /* Open the file */
-	  o_flags = O_DIRECT | O_LARGEFILE | O_RDWR;
+	  o_flags = O_DIRECT | O_LARGEFILE | O_RDWR | O_SYNC;
           prv->fd = holey_open(realname, o_flags);
 
           if ( (prv->fd == -1) && (errno == EINVAL) ) {
@@ -319,7 +327,7 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
         }
         
 
-        ret = holey_pread(prv->fd,buf,size,offset,&prv->aio,cb,id,sector,private);
+        ret = holey_pread(prv->fd,buf,size,offset);
         if (ret != size) {
 			ret = 0 - errno;
 	} else {
@@ -340,64 +348,16 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
 	struct   tdholey_state *prv = (struct tdholey_state *)dd->private;
 	int      size    = nb_sectors * s->sector_size;
 	uint64_t offset  = sector * (uint64_t)s->sector_size;
-        //int master;  
         int ret;     
-        int wait =0; 
-        uint64_t boff,cursor;
-
-        
-        struct disk_driver **aux= malloc(sizeof(struct disk_driver *));
-        *aux = dd;
-
-        cursor=offset&OFFMASK;
-        boff=cursor>>FDBITS;
-
-        //master = atoi(&prv->name[strlen(prv->name)-1]);
-
-        ret = holey_pwrite(prv->fd,buf,size,offset,&prv->aio,cb,id,sector,nb_sectors,private,aux,&wait);
+       
+        ret = holey_pwrite(prv->fd,buf,size,offset);
         if (ret != size) {
 			ret = 0 - errno;
 	} else {
 			ret = 1;
 	}
        
-        
-        
-        if(wait==1){
-
-         
-          pthread_cond_wait(&writecomp, &writemutex);
- 
-
-          pthread_mutex_unlock(&writemutex);
-
-
-          ret = pwrite(herd.storage, herd.cache[boff].data, BLKSIZE, offset);
-          if (ret != size) {
-			ret = 0 - errno;
-	  } else {
-			ret = 1;
-	  } 
-	  
-
-         }
-
-        ret = cb(dd, (ret < 0) ? ret: 0, sector, nb_sectors, id, private);
-
-        if(prv->master ==1){
-          pthread_mutex_unlock(&mutex_cow);
-
-        }
-
-        if(wait==1){
-   
-          herd.cache[boff].data=NULL;
-          st_w_stab_blks++;
-
-        }
- 
-
-        return ret;
+        return cb(dd, (ret < 0) ? ret: 0, sector, nb_sectors, id, private);
 }
 
 static int tdholey_submit(struct disk_driver *dd)
@@ -422,37 +382,7 @@ static int tdholey_close(struct disk_driver *dd)
 
 static int tdholey_do_callbacks(struct disk_driver *dd, int sid)
 {
-        int i, nr_events, rsp = 0;
-	struct io_event *ep;
-	struct tdholey_state *prv = (struct tdholey_state *)dd->private;
-
-	nr_events = holey_aio_get_events(&prv->aio.aio_ctx);
-repeat:
-	for (ep = prv->aio.aio_events, i = nr_events; i-- > 0; ep++) {
-		struct iocb        *io  = ep->obj;
-		struct pending_aio *pio;
-		
-        	pio = &prv->aio.pending_aio[(long)io->data];
- 
-              
-		rsp += pio->cb(dd, ep->res == io->u.c.nbytes ? 0 : 1,
-			       pio->sector, io->u.c.nbytes >> 9, 
-			       pio->id, pio->private);
-
-                pthread_mutex_unlock(&mutex_cow);
-
-        	prv->aio.iocb_free[prv->aio.iocb_free_count++] = io;
-	}
-
-	if (nr_events) {
-		nr_events = holey_aio_more_events(&prv->aio.aio_ctx);
-		goto repeat;
-	}
-
-	holey_aio_continue(&prv->aio.aio_ctx);
-      
-        //when change assync
-	//return rsp;
+        //return rsp;
         return 1;
 }
 

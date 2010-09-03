@@ -1,4 +1,3 @@
-
 This How-To explains how to run the prototype in a single physical machine.
 In this machine we run a master and several slaves in independent VMs.
 
@@ -71,7 +70,7 @@ The file that will be used as the real partition that will be written by the mas
 
 dd if=/dev/zero of=/home/image bs=4K count=1 seek=3M (Here the size must be the one we want the partition to have)
 
-ATTENTION!! - This last file must have the same name of the dummy files without the last number.
+ATTENTION!! - This last file mus		t have the same name of the dummy files without the last number.
 In the example given above, we created a file named image that will be the partition written by the master VM.
 We created two dummy files, image1 and image2, that will be neeeded by the tap driver in order to pass the initial arguments.
 The name of the real partition must not end with a number...

@@ -1,3 +1,7 @@
+# holeycow-xen
+# (c) 2010 2010 U. Minho. Written by J. Paulo
+
+# Based on:
 # Copyright (c) 2005, XenSource Ltd.
 
 

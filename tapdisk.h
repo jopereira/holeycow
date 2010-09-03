@@ -1,7 +1,10 @@
 /* tapdisk.h
+ * 
+ * Holeycow-xen
+ * (c) 2010 U. Minho. Written by J. Paulo
  *
- * Generic disk interface for blktap-based image adapters.
- *
+ * Based on:
+ * Blktap-xen
  * (c) 2006 Andrew Warfield and Julian Chesterfield
  * 
  * Some notes on the tap_disk interface:

@@ -1,6 +1,12 @@
 /*
- * HoleyCoW - The holey copy-on-write library
- * Copyright (C) 2008 José Orlando Pereira, Luís Soares
+ * Holeycow-xen
+ * (c) 2010 U. Minho. Written by J. Paulo
+ *
+ * Based on:
+ *
+ * Holeycow-mysql
+ * (c) 2008 José Orlando Pereira, Luís Soares
+ * 
  * 
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -35,14 +41,12 @@
 #include "defs.h"
 #include "mytime.h"
 
-#include "tapdisk.h"
+//#include "tapdisk.h"
 
 #define STAB_PORT	12345
 #define STAB_QUEUE	1000
 
 pthread_mutex_t mutex_cow = PTHREAD_MUTEX_INITIALIZER; 
-pthread_cond_t writecomp = PTHREAD_COND_INITIALIZER;
-pthread_mutex_t writemutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 static int ncow;
@@ -53,14 +57,6 @@ static char* cow_basedir;
 struct ctap{
 
     void* data;
-    //holey_aio_context_t *aio; 
-    td_callback_t cb; 
-    int id; 
-    uint64_t sector; 
-    void *private;
-    //struct disk_driver **dd;
-    int nb_sectors;
-
         
 };
 
@@ -150,23 +146,30 @@ static void master_cb(block_t id) {
         FILE *fp;
 
         int ft;
-        int res=0;
+        
         
         off_t offset;
         uint64_t boff;
-
+        int res=0;
+ 
+        pthread_mutex_lock(&mutex_cow);
+        
         offset=id&OFFMASK;
 	boff=offset>>FDBITS;
 
-        pthread_mutex_lock(&writemutex);
+        pwrite(herd.storage, herd.cache[boff].data, BLKSIZE, offset);
+	
+        free(herd.cache[boff].data);
+	herd.cache[boff].data=NULL;
 
-        pthread_cond_signal(&writecomp);
+	st_w_stab_blks++;
 
-        pthread_mutex_unlock(&writemutex);
-
-        fp=fopen(HLOG,"a");
-        fprintf(fp,"MASTER: storage persistent - block %d\n", herd.cache[boff].id);
+	fp=fopen(HLOG,"a");
+        fprintf(fp,"MASTER: storage persistent - block\n");
         fclose(fp);
+
+        pthread_mutex_unlock(&mutex_cow);
+
 
 }
 
@@ -203,13 +206,11 @@ static int master_open(char* path, int flags) {
 }
 
 
-static int master_pwrite(int fde,void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector,int nb_sector, void* private, struct disk_driver **dd, int *wait) {
+static int master_pwrite(int fde,void* data, size_t count, off_t offset){
 
         int done;
         int ft;
         int res;
-
-        *wait =0;
 
       	pthread_mutex_lock(&mutex_cow);
 
@@ -229,29 +230,22 @@ static int master_pwrite(int fde,void* data, size_t count, off_t offset, holey_a
 			 st_w_reg_blks++;
 		} else {
 
-                        pthread_mutex_lock(&writemutex);
-                        *wait =1;
-                        if (herd.cache[boff].data == NULL) {
+                         if (herd.cache[boff].data == NULL) {
+                                herd.cache[boff].data=malloc(BLKSIZE);
                         	if (bcount!=BLKSIZE) {
 
                                        st_frag_blks++;
                                        //Sync
 				       pread(herd.storage, herd.cache[boff].data, BLKSIZE, cursor);
 				}
-
-                                herd.cache[boff].id = id1;
-                                herd.cache[boff].sector = sector;
-                                herd.cache[boff].nb_sectors = nb_sector;
-
-                                herd.cache[boff].private = private;
-                                
-                                herd.cache[boff].cb = cb;
                                              
 				add_block(id);
                                 
+                                
 			}
-			
-                        herd.cache[boff].data = data;
+                        memcpy(herd.cache[boff].data+(offset-cursor), data, bcount);
+                        //TODO If wait_sync is not commented we have deadlock here...
+                        //wait_sync(0);
                        
 
 		}
@@ -263,10 +257,12 @@ static int master_pwrite(int fde,void* data, size_t count, off_t offset, holey_a
 	}
 
      
+        pthread_mutex_unlock(&mutex_cow);
+
      	return done;
 }
 
-static int master_pread(int fde,void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
+static int master_pread(int fde,void* data, size_t count, off_t offset){
 
         int done;
         
@@ -425,12 +421,11 @@ static void slave_cb(block_t id) {
 }
 
 
-static int slave_pwrite(int fde, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector,int nb_sectors, void* private, struct disk_driver** dd,int *wait) {
+static int slave_pwrite(int fde, void* data, size_t count, off_t offset) {
         int done;
  
      
-        *wait =0;
-        
+    
 	pthread_mutex_lock(&mutex_cow);
 
 	done=0;
@@ -478,7 +473,7 @@ static int slave_pwrite(int fde, void* data, size_t count, off_t offset, holey_a
 	return done;
 }
 
-static int slave_pread(int fde,void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
+static int slave_pread(int fde,void* data, size_t count, off_t offset) {
         int done;
 
          
@@ -661,20 +656,18 @@ static int orig_close(int fd) {
 }
 
 //FIXME We must change here the return...
-static int orig_pwrite(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector,int nb_sector, void* private,struct disk_driver** dd, int * i) {
+static int orig_pwrite(int fd, void* data, size_t count, off_t offset) {
 	pthread_mutex_lock(&mutex_cow);
 	st_w_reg_blks++;
 	pthread_mutex_unlock(&mutex_cow);
-        return holey_aio_write(aio, fd, count, offset, (char*) data, cb, id1, sector, private,0,0,0);
-	//return pwrite(fd, data, count, offset);
+        return pwrite(fd, data, count, offset);
 }
 
-static int orig_pread(int fd, void* data, size_t count, off_t offset, holey_aio_context_t* aio, td_callback_t cb, int id1, uint64_t sector, void* private) {
+static int orig_pread(int fd, void* data, size_t count, off_t offset) {
 	pthread_mutex_lock(&mutex_cow);
 	st_r_reg_blks++;
 	pthread_mutex_unlock(&mutex_cow);
-        return holey_aio_read(aio, fd, count, offset, (char*) data, cb, id1, sector, private);
-	//return pread(fd, data, count, offset);
+        return pread(fd, data, count, offset);
 }
 
 static int orig_fsync(int fd) {
@@ -752,8 +745,8 @@ void holey_init(int profile, char* master_ip, int n_slaves, char* cow_basedir) {
 void (*holey_start)(int) = holey_cow_start_null;
 int (*holey_open)(char*, int) = orig_open;
 int (*holey_close)(int) = orig_close;
-int (*holey_pwrite)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback_t, int, uint64_t,int, void*,struct disk_driver**,int *) = orig_pwrite;
-int (*holey_pread)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback_t, int, uint64_t, void*) = orig_pread;
+int (*holey_pwrite)(int, void*, size_t, off_t) = orig_pwrite;
+int (*holey_pread)(int, void*, size_t, off_t) = orig_pread;
 int (*holey_fsync)(int) = orig_fsync;
 off_t (*holey_lseek)(int, off_t, int) = orig_lseek;
 

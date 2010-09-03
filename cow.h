@@ -1,6 +1,11 @@
 /*
- * HoleyCoW - The holey copy-on-write library
- * Copyright (C) 2008 José Orlando Pereira, Luís Soares
+ * Holeycow-xen
+ * (c) 2010 U. Minho. Written by J. Paulo
+ *
+ * Based on:
+ *
+ * Holeycow-mysql
+ * (c) 2008 José Orlando Pereira, Luís Soares
  * 
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -38,8 +43,8 @@
 extern void (*holey_start)(int);
 extern int (*holey_open)(char*, int);
 extern int (*holey_close)(int);
-extern int (*holey_pwrite)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback_t, int, uint64_t, int, void*,struct disk_driver**,int *);
-extern int (*holey_pread)(int, void*, size_t, off_t, holey_aio_context_t*, td_callback_t, int, uint64_t, void*);
+extern int (*holey_pwrite)(int, void*, size_t, off_t);
+extern int (*holey_pread)(int, void*, size_t, off_t);
 extern int (*holey_fsync)(int);
 extern off_t (*holey_lseek)(int, off_t, int);
 
