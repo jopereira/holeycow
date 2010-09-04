@@ -41,15 +41,9 @@
 #include "defs.h"
 #include "mytime.h"
 
-//#include "tapdisk.h"
-
 #define STAB_PORT	12345
 #define STAB_QUEUE	1000
 
-pthread_mutex_t mutex_cow = PTHREAD_MUTEX_INITIALIZER; 
-
-
-static int ncow;
 static int slaveid;
 static char* cow_basedir;
 
@@ -61,6 +55,8 @@ struct ctap{
 };
 
 struct {
+	pthread_mutex_t mutex_cow; 
+
 	/* common */
 	int storage;
 	char* storage_fname;
@@ -152,7 +148,7 @@ static void master_cb(block_t id) {
         uint64_t boff;
         int res=0;
  
-        pthread_mutex_lock(&mutex_cow);
+        pthread_mutex_lock(&herd.mutex_cow);
         
         offset=id&OFFMASK;
 	boff=offset>>FDBITS;
@@ -168,7 +164,7 @@ static void master_cb(block_t id) {
         fprintf(fp,"MASTER: storage persistent - block\n");
         fclose(fp);
 
-        pthread_mutex_unlock(&mutex_cow);
+        pthread_mutex_unlock(&herd.mutex_cow);
 
 
 }
@@ -179,8 +175,7 @@ static int master_open(char* path, int flags) {
         int fdaux;
         uint64_t maxblk;  
 
-	pthread_mutex_lock(&mutex_cow);
-	
+	pthread_mutex_init(&herd.mutex_cow, NULL);
 
 	// FIXME: should propagate permission flags
 	fdaux = open(path, flags, 0644);
@@ -200,8 +195,6 @@ static int master_open(char* path, int flags) {
 		res = 0;
 	}
 
-	pthread_mutex_unlock(&mutex_cow);
-
 	return res;
 }
 
@@ -212,7 +205,7 @@ static int master_pwrite(int fde,void* data, size_t count, off_t offset){
         int ft;
         int res;
 
-      	pthread_mutex_lock(&mutex_cow);
+      	pthread_mutex_lock(&herd.mutex_cow);
 
         done=0;
 
@@ -257,7 +250,7 @@ static int master_pwrite(int fde,void* data, size_t count, off_t offset){
 	}
 
      
-        pthread_mutex_unlock(&mutex_cow);
+        pthread_mutex_unlock(&herd.mutex_cow);
 
      	return done;
 }
@@ -267,7 +260,7 @@ static int master_pread(int fde,void* data, size_t count, off_t offset){
         int done;
         
        
-        pthread_mutex_lock(&mutex_cow);
+        pthread_mutex_lock(&herd.mutex_cow);
 
         
 	done =0;
@@ -298,7 +291,7 @@ static int master_pread(int fde,void* data, size_t count, off_t offset){
 		done+=bcount;
 	}
 
-       pthread_mutex_unlock(&mutex_cow);
+       pthread_mutex_unlock(&herd.mutex_cow);
 
       
 	return done;
@@ -309,9 +302,9 @@ static int master_fsync(int dum) {
 
 	wait_sync(0);
 
-	pthread_mutex_lock(&mutex_cow);
+	pthread_mutex_lock(&herd.mutex_cow);
 	fsync(herd.storage);
-	pthread_mutex_unlock(&mutex_cow);
+	pthread_mutex_unlock(&herd.mutex_cow);
 
 	/* printf("MASTER: SYNC DONE \n"); */
 
@@ -361,25 +354,14 @@ static void master_init(int nslaves, int sz) {
 	master_stab(fd, nslaves, sz, master_cb);
 }
 
-static off_t master_lseek(int fde,off_t offset, int whence) {
-	off_t ret;
-
-	pthread_mutex_lock(&mutex_cow);
-	ret = lseek(herd.storage, offset, whence);	
-	pthread_mutex_unlock(&mutex_cow);
-
-	return ret;
-}
-
 static int master_close(int dum) {
-	pthread_mutex_lock(&mutex_cow);
+	pthread_mutex_lock(&herd.mutex_cow);
 
 	close(herd.storage);
 	free(herd.storage_fname);
 
 	// FIXME: should't assume LIFO open/close
-	//ncow--;
-	pthread_mutex_unlock(&mutex_cow);
+	pthread_mutex_unlock(&herd.mutex_cow);
         //ADDED
         return 0;
 }
@@ -394,7 +376,7 @@ static void slave_cb(block_t id) {
 
 
         
-	pthread_mutex_lock(&mutex_cow);
+	pthread_mutex_lock(&herd.mutex_cow);
 	if (!test_and_set(id)) {
 
 		char data[BLKSIZE];
@@ -413,7 +395,7 @@ static void slave_cb(block_t id) {
 	} /*else {
 		printf("SLAVE: block %d already copied\n", id);
 	}*/
-	pthread_mutex_unlock(&mutex_cow);
+	pthread_mutex_unlock(&herd.mutex_cow);
 
         
 
@@ -426,7 +408,7 @@ static int slave_pwrite(int fde, void* data, size_t count, off_t offset) {
  
      
     
-	pthread_mutex_lock(&mutex_cow);
+	pthread_mutex_lock(&herd.mutex_cow);
 
 	done=0;
 
@@ -466,7 +448,7 @@ static int slave_pwrite(int fde, void* data, size_t count, off_t offset) {
                 done+=bcount;
 	}
 
-	pthread_mutex_unlock(&mutex_cow);
+	pthread_mutex_unlock(&herd.mutex_cow);
 
       
 
@@ -477,7 +459,7 @@ static int slave_pread(int fde,void* data, size_t count, off_t offset) {
         int done;
 
          
-        pthread_mutex_lock(&mutex_cow);
+        pthread_mutex_lock(&herd.mutex_cow);
         
 
 	done=0;
@@ -509,7 +491,7 @@ static int slave_pread(int fde,void* data, size_t count, off_t offset) {
 		done+=bcount;
 	}
 
-       pthread_mutex_unlock(&mutex_cow);
+       pthread_mutex_unlock(&herd.mutex_cow);
    
      
        return done;
@@ -528,7 +510,7 @@ static int slave_open(char* path, int flags) {
         int res;
 	int fdaux;
 
-	pthread_mutex_lock(&mutex_cow);
+	pthread_mutex_init(&herd.mutex_cow, NULL);
 
 	/* TODO: what about O_RDONLY flag */
 	// FIXME: should propagate permission flags
@@ -579,7 +561,6 @@ static int slave_open(char* path, int flags) {
 		res = 0;
 	}
 
-	pthread_mutex_unlock(&mutex_cow);
 	return res;
 }
 
@@ -609,21 +590,10 @@ static void slave_init(char* addr, int sz, char* p_cow_basedir) {
 	slaveid=slave_stab(fd, sz, slave_cb);
 }
 
-static off_t slave_lseek(int fde, off_t offset, int whence) {
-	off_t ret;
-
-	pthread_mutex_lock(&mutex_cow);
-	ret = lseek(herd.snapshot, offset, whence);	
-	pthread_mutex_unlock(&mutex_cow);
-
-	return ret;
-
-}
-
 static int slave_close(int dum) {
 
 	/* TODO: assuming that reopen is on the same order */
-	pthread_mutex_lock(&mutex_cow);
+	pthread_mutex_lock(&herd.mutex_cow);
 	
 	close(herd.storage);
 	close(herd.snapshot);
@@ -632,122 +602,8 @@ static int slave_close(int dum) {
 	free(herd.snapshot_fname);
 
 	// Shouldn't assume LIFO open/close order
-	//ncow--;
-	pthread_mutex_unlock(&mutex_cow);
-        //ADDED
-        return 0;
-
-}
-
-/******************************************
- * Regular Function mapping 
- */
-static void holey_cow_start_null(int size) { 
-	return; 
-}
-
-static int orig_open(char* path, int flags) { 
-	// FIXME: should propagate permission flags
-	return open(path, flags, 0644);
-}
-
-static int orig_close(int fd) {
-	return close(fd);
-}
-
-//FIXME We must change here the return...
-static int orig_pwrite(int fd, void* data, size_t count, off_t offset) {
-	pthread_mutex_lock(&mutex_cow);
-	st_w_reg_blks++;
-	pthread_mutex_unlock(&mutex_cow);
-        return pwrite(fd, data, count, offset);
-}
-
-static int orig_pread(int fd, void* data, size_t count, off_t offset) {
-	pthread_mutex_lock(&mutex_cow);
-	st_r_reg_blks++;
-	pthread_mutex_unlock(&mutex_cow);
-        return pread(fd, data, count, offset);
-}
-
-static int orig_fsync(int fd) {
-	fsync(fd);
+	pthread_mutex_unlock(&herd.mutex_cow);
         //ADDED
         return 0;
 }
-
-static off_t orig_lseek(int fd, off_t offset, int whence) {
-	return lseek(fd, offset, whence);
-}
-
-
-/***
- * Initialize function.
- */
-void holey_init(int profile, char* master_ip, int n_slaves, char* cow_basedir) {
-	pthread_t logger;
-        FILE* fp;
-
-        fp = fopen(HLOG,"a");
-	fprintf(fp,"Holey init: %d - %s - %d - %s\n", profile, master_ip, n_slaves, cow_basedir);
-        fclose(fp);        
-
-	pthread_create(&logger, NULL, stats_thread, NULL);
-
-	switch(profile) {
-		
-		case HOLEY_SERVER_STATUS_MASTER:
-                       	printf("Selected Holey Server Profile: MASTER\n");
-
-			holey_start = master_start;
-			holey_open = master_open;
-			holey_close = master_close;
-			holey_pwrite = master_pwrite;
-			holey_pread = master_pread;
-			holey_fsync = master_fsync;
-			holey_lseek = master_lseek;
-		
-                        
-			master_init(n_slaves, STAB_QUEUE);
-                        break;
-
-		case HOLEY_SERVER_STATUS_SLAVE:
-			printf("Selected Holey Server Profile: SLAVE\n");
-
-			holey_start = slave_start;
-			holey_open = slave_open;
-			holey_close = slave_close;
-			holey_pwrite = slave_pwrite;
-			holey_pread = slave_pread;
-			holey_fsync = slave_fsync;
-			holey_lseek = slave_lseek;
-
-			slave_init(master_ip, STAB_QUEUE, cow_basedir);
-			break;
-	
-		case HOLEY_SERVER_STATUS_INACTIVE:
-		default:
-			printf("Selected Holey Server Profile: INACTIVE\n");
-			holey_start = holey_cow_start_null;
-			holey_open = orig_open;
-			holey_close = orig_close;
-			holey_pwrite = orig_pwrite;
-			holey_pread = orig_pread;
-			holey_fsync = orig_fsync;
-			holey_lseek = orig_lseek;
-			break;
-		
-	}
-}
-
-
-/* initially functions point to null ones */
-void (*holey_start)(int) = holey_cow_start_null;
-int (*holey_open)(char*, int) = orig_open;
-int (*holey_close)(int) = orig_close;
-int (*holey_pwrite)(int, void*, size_t, off_t) = orig_pwrite;
-int (*holey_pread)(int, void*, size_t, off_t) = orig_pread;
-int (*holey_fsync)(int) = orig_fsync;
-off_t (*holey_lseek)(int, off_t, int) = orig_lseek;
-
 
