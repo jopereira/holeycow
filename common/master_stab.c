@@ -27,7 +27,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "defs.h"
+#include "holeycow.h"
 #include "stability.h"
 #include <unistd.h>
 
@@ -49,13 +49,10 @@ static pthread_cond_t notempty, ready, sync1;
 
 static int* sock;
 
-static master_callback_t callback;
+static callback_t callback;
 
 static pthread_t sender, receiver, pool;
 static int slaves;
-
-extern unsigned long st_n_blks;
-extern unsigned long st_n_msgs;
 
 static void send(void* blocks, int size) {
 	int i;
@@ -66,10 +63,8 @@ static void send(void* blocks, int size) {
 }
 
 static void* sender_thread(void* p) {
-        FILE *fp;     
- 
 
-        pthread_mutex_lock(&mux);
+	pthread_mutex_lock(&mux);
 
 	while(1) {
 
@@ -84,14 +79,7 @@ static void* sender_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-		st_n_blks+=size;
-		st_n_msgs++;
 		send(buffer+st, size*sizeof(uint64_t));
-
-                fp=fopen(HLOG,"a");
-                fprintf(fp,"MASTER: stability sent %d blocks\n", size);
-                fclose(fp);
-		
 
 		usleep(1000);
 
@@ -112,7 +100,6 @@ static int receive(int id) {
 }
 
 static void* receiver_thread(void* p) {
-        FILE* fp;
 	int id=(int)p;
 
 	while(1) {
@@ -129,10 +116,6 @@ static void* receiver_thread(void* p) {
 				size=sizes[i];
 		}
 
-                fp=fopen(HLOG,"a");
-                fprintf(fp,"MASTER: stability received %d blocks\n", size);
-                fclose(fp);
-                
 		if (size>0) {
 			for(i=0;i<slaves;i++)
 				sizes[i]-=size;
@@ -165,7 +148,7 @@ static void* pool_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-		callback(cookiejar[idx]);
+		callback(buffer[idx], cookiejar[idx]);
 
 		pthread_mutex_lock(&mux);
 
@@ -181,7 +164,7 @@ static void* pool_thread(void* p) {
 	}
 }
 
-void master_stab(int s[], int nslaves, int sz, master_callback_t cb) {
+void master_stab(int s[], int nslaves, int sz, callback_t cb) {
 	int i;
 
 	max=sz;
@@ -218,8 +201,6 @@ void master_start(int npool) {
 
 int add_block(block_t id, void* cookie) {
 	int result;
-        FILE *fp;
-
        
 	pthread_mutex_lock(&mux);
 

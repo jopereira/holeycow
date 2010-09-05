@@ -27,7 +27,7 @@
 #include <stdio.h>
 
 #include "stability.h"
-#include "defs.h"
+#include "holeycow.h"
 #include <unistd.h>
 
 /* Circular buffer with 2 tails. Invariant: sn <= rn */
@@ -43,18 +43,15 @@ static pthread_cond_t notempty, ready;
 static int sock;
 
 static callback_t callback;
+static void* cookie;
 
 static pthread_t sender, receiver, pool;
-
-extern unsigned long st_n_blks;
-extern unsigned long st_n_msgs;
 
 static int receive(void* buffer, int size) {
 	return read(sock, buffer, size);
 }
 
 static void* receiver_thread(void* p) {
-        FILE *fp;
 	pthread_mutex_lock(&mux);
 
 	while(1) {
@@ -69,7 +66,6 @@ static void* receiver_thread(void* p) {
 
 		size=receive(buffer+h, size*sizeof(uint64_t));
 	
-
 		if(size == 0) {		/* closed socket */
 			/* TODO: flush? return error? what? */
 			fprintf(stderr, " *** Bailing out! Master closed socket! *** \n");
@@ -81,10 +77,6 @@ static void* receiver_thread(void* p) {
 		size/=sizeof(uint64_t);
 		h=(h+size)%max;
 
-                fp=fopen(HLOG,"a");
-                fprintf(fp,"slave: stability received %d blocks\n", size);
-                fclose(fp);
- 
 		pthread_mutex_lock(&mux);
 
 		sn+=size;
@@ -95,7 +87,6 @@ static void* receiver_thread(void* p) {
 }
 
 static void* pool_thread(void* p) {
-        FILE* fp;
 	pthread_mutex_lock(&mux);
 	while(1) {
 
@@ -109,11 +100,7 @@ static void* pool_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-                fp=fopen(HLOG,"a");
-                fprintf(fp,"SLAVE: handling block %llu\n", buffer[idx]);
-                fclose(fp);
-
-		callback(buffer[idx]);
+		callback(buffer[idx], cookie);
 
 		pthread_mutex_lock(&mux);
 
@@ -128,7 +115,6 @@ static void send(int size) {
 }
 
 static void* sender_thread(void* p) {
-        FILE *fp;
 	while(1) {
                 int size;
  		pthread_mutex_lock(&mux);
@@ -145,27 +131,20 @@ static void* sender_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-		st_n_msgs++;
-		st_n_blks+=size;
 		send(size);
 
-                fp=fopen(HLOG,"a");
-                fprintf(fp,"SLAVE: stability sent %d blocks\n", size);
-                fclose(fp);
-                
-		
- 
 		usleep(1000);
 	}
 }
 
-int slave_stab(int s, int sz, callback_t cb) {
+int slave_stab(int s, int sz, callback_t cb, void* c) {
 	int i, id;
 
 	max=sz;
 	buffer=(uint64_t*)calloc(sizeof(uint64_t), max);
 
 	callback=cb;
+	cookie=c;
 
 	sock=s;
 
