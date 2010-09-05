@@ -33,6 +33,7 @@
 
 /* Circular buffer with 2 tails. Invariant: sn <= rn */
 static block_t* buffer;
+static void** cookiejar;
 static int max, h;		/* capacity and head */
 static int st, sn;		/* sender tail and size */
 static int rt, rn;		/* receiver tail and size */
@@ -48,7 +49,7 @@ static pthread_cond_t notempty, ready, sync1;
 
 static int* sock;
 
-static callback_t callback;
+static master_callback_t callback;
 
 static pthread_t sender, receiver, pool;
 static int slaves;
@@ -164,7 +165,7 @@ static void* pool_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-		callback(buffer[idx]);
+		callback(cookiejar[idx]);
 
 		pthread_mutex_lock(&mux);
 
@@ -180,11 +181,12 @@ static void* pool_thread(void* p) {
 	}
 }
 
-void master_stab(int s[], int nslaves, int sz, callback_t cb) {
+void master_stab(int s[], int nslaves, int sz, master_callback_t cb) {
 	int i;
 
 	max=sz;
 	buffer=(uint64_t*)calloc(sizeof(uint64_t), max);
+	cookiejar=(void**)calloc(sizeof(void*), max);
 
 	callback=cb;
 
@@ -214,7 +216,7 @@ void master_start(int npool) {
 	started = 1;
 }
 
-int add_block(block_t id) {
+int add_block(block_t id, void* cookie) {
 	int result;
         FILE *fp;
 
@@ -224,6 +226,7 @@ int add_block(block_t id) {
 	assert(rn!=max);
 
 	buffer[h]=id;
+	cookiejar[h]=cookie;
 	sn++;
 	h=(h+1)%max;
 

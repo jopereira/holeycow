@@ -28,11 +28,12 @@
 
 typedef uint64_t block_t;
 typedef void (*callback_t)(block_t);
+typedef void (*master_callback_t)(void*);
 
 /* master aka designated writer */
-void master_stab(int* sock, int nslaves, int s, callback_t cb);
+void master_stab(int* sock, int nslaves, int s, master_callback_t);
 void master_start(int npool);
-int add_block(block_t id);
+int add_block(block_t id, void*);
 void wait_sync(int dump);
 
 /* slave aka replica */
