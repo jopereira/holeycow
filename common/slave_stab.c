@@ -61,7 +61,7 @@ static void* receiver_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-		size=receive(buffer+h, size*sizeof(uint64_t));
+		size=receive(buffer+h, size*sizeof(block_t));
 	
 		if(size == 0) {		/* closed socket */
 			/* TODO: flush? return error? what? */
@@ -69,9 +69,9 @@ static void* receiver_thread(void* p) {
 			exit(0);
 		}
 	
-		assert(size>0 && !(size%sizeof(uint64_t)));
+		assert(size>0 && !(size%sizeof(block_t)));
 		
-		size/=sizeof(uint64_t);
+		size/=sizeof(block_t);
 		h=(h+size)%max;
 
 		pthread_mutex_lock(&mux);
@@ -87,7 +87,7 @@ static void* pool_thread(void* p) {
 	pthread_mutex_lock(&mux);
 	while(1) {
 
-                int idx;
+		int idx;
 		while(rn==0)
 			pthread_cond_wait(&notempty, &mux);
 
@@ -113,7 +113,7 @@ static void send(int size) {
 
 static void* sender_thread(void* p) {
 	while(1) {
-                int size;
+		int size;
  		pthread_mutex_lock(&mux);
 
 		while(sn==0 || buffer[st]!=-1)
@@ -135,7 +135,7 @@ static void* sender_thread(void* p) {
 }
 
 int slave_stab(int s, int sz, callback_t cb, void* c) {
-	int i, id;
+	int i;
 
 	max=sz;
 	buffer=(uint64_t*)calloc(sizeof(uint64_t), max);
@@ -145,13 +145,11 @@ int slave_stab(int s, int sz, callback_t cb, void* c) {
 
 	sock=s;
 
-	read(sock, &id, sizeof(id));
-
 	pthread_mutex_init(&mux, NULL);
 	pthread_cond_init(&notempty, NULL);
 	pthread_cond_init(&ready, NULL);
 
-	return id;
+	return 0;
 }
 
 void slave_start(int npool) {

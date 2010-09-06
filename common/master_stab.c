@@ -172,9 +172,6 @@ void master_stab(int s[], int nslaves, int sz, callback_t cb) {
 	slaves=nslaves;
 	sock=s;
 
-	for(i=0;i<nslaves;i++)
-		write(sock[i], &i, sizeof(i));
-
 	sizes=(int*)calloc(nslaves, sizeof(int));
 
 	pthread_mutex_init(&mux, NULL);
