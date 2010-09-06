@@ -1,5 +1,5 @@
 
-OBJS = holeycow.o master_stab.o slave_stab.o mytime.o device.o
+OBJS = holeycow.o master_stab.o slave_stab.o device.o
 
 all: libholeycow.a
 

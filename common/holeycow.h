@@ -25,44 +25,43 @@
 #ifndef __COW__
 #define __COW__
 
-#include "defs.h"
+#include <sys/types.h>
 
-#define HOLEY_SERVER_STATUS_INACTIVE 0
-#define HOLEY_SERVER_STATUS_SLAVE 1
-#define HOLEY_SERVER_STATUS_MASTER 2
-
-//changed here
 #define FDBITS 12
+
 #define FDMASK ((1<<FDBITS)-1)
 #define OFFMASK (~((1<<FDBITS)-1))
+#define BLKSIZE (1<<FDBITS)
 
 #define GETBLK(id) (id&OFFMASK)>>FDBITS
-#define GETFD(id) (id&FDMASK)
 
-/* initially functions point to null ones */
-extern void (*holey_start)(int);
-extern int (*holey_open)(char*, int);
-extern int (*holey_close)(int);
-extern int (*holey_pwrite)(int, void*, size_t, off_t);
-extern int (*holey_pread)(int, void*, size_t, off_t);
-extern int (*holey_fsync)(int);
-extern off_t (*holey_lseek)(int, off_t, int);
+/* Generic asynchronous block device */
+struct device;
 
-/*
- * @profile
- *   0 - inactive
- *   1 - slave
- *   2 - master
- *
- * @master_ip
- *   ip address of master (slaves only)
- *
- * @n_slaves
- * 	 the number of slaves (master only)
- *
- * @cow_basedir
- * 	 the directory path holding the snapshots	
- */
+typedef void (*dev_callback_t)(void*, int);
+
+struct device_ops {
+	void (*pwrite)(struct device*, void*, size_t, off_t, dev_callback_t, void*);
+	void (*pread)(struct device*, void*, size_t, off_t, dev_callback_t, void*);
+	int (*close)(struct device*);
+};
+
+struct device {
+	struct device_ops* ops;
+	void* data;
+};
+
+#define device_pwrite(dev, buf, size, off, cb, cookie) (dev)->ops->pwrite(dev, buf, size, off, cb, cookie)
+#define device_pread(dev, buf, size, off, cb, cookie) (dev)->ops->pread(dev, buf, size, off, cb, cookie)
+#define device_close(dev) (dev)->ops->close(dev)
+
+/* Simulate synchronous I/O */
+extern int device_pwrite_sync(struct device*, void*, size_t, off_t);
+extern int device_pread_sync(struct device*, void*, size_t, off_t);
+
+/* Enforce block aligned I/O */
+extern void blockalign(struct device*, struct device*);
+
 void holey_init(int profile, char* master_ip, int n_slaves, char* cow_basedir);
 
 #endif

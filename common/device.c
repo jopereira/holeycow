@@ -1,5 +1,5 @@
 
-#include "device.h"
+#include "holeycow.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -68,14 +68,12 @@ int device_pread_sync(struct device* dev, void* buf, size_t size, off_t offset) 
 
 struct blockalign_data {
 	struct device* impl;
-	int blksize;
-	uint64_t offmask;
 };
 
 #define D(dev) ((struct blockalign_data*)(dev)->data)
 
 struct fragmented {
-	callback cb;
+	dev_callback_t cb;
 	void * cookie;
 
 	pthread_mutex_t mutex;
@@ -119,7 +117,7 @@ static void pwrite_cb(void* cookie, int ret) {
 	struct incomplete* inc = (struct incomplete*) cookie;
 
 	memcpy(inc->tmp+(inc->offset-inc->cursor), inc->buffer, inc->bcount);
-	device_pwrite(inc->dev, inc->tmp, D(inc->dev)->blksize, inc->cursor, cleanup_cb, inc);
+	device_pwrite(inc->dev, inc->tmp, BLKSIZE, inc->cursor, cleanup_cb, inc);
 }
 
 static void pread_cb(void* cookie, int ret) {
@@ -129,7 +127,7 @@ static void pread_cb(void* cookie, int ret) {
 	frag_cb(inc->frag, ret);
 }
 
-static void blockalign_pwrite(struct device* dev, void* data, size_t count, off_t offset, callback cb, void* cookie) {
+static void blockalign_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
 	struct fragmented* frag = (struct fragmented*) malloc(sizeof(struct fragmented));
 	memset(frag, 0 , sizeof(*frag));
 
@@ -144,11 +142,11 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off_
 		frag->count++;
 		pthread_mutex_unlock(&frag->mutex);
 
-		uint64_t cursor=offset & D(dev)->offmask;
-		int bcount = offset+count > cursor+D(dev)->blksize ? cursor+D(dev)->blksize-offset : count;
+		uint64_t cursor=offset & OFFMASK;
+		int bcount = offset+count > cursor+BLKSIZE ? cursor+BLKSIZE-offset : count;
 				
-		if (bcount!=D(dev)->blksize) {
-			struct incomplete* inc = (struct incomplete*) malloc(sizeof(struct incomplete)+D(dev)->blksize);
+		if (bcount!=BLKSIZE) {
+			struct incomplete* inc = (struct incomplete*) malloc(sizeof(struct incomplete)+BLKSIZE);
 			memset(inc, 0 , sizeof(*inc));
 
 			inc->frag = frag;
@@ -158,9 +156,9 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off_
 			inc->offset = offset;
 			inc->buffer = data;
 
-			device_pread(dev, inc->tmp, D(dev)->blksize, cursor, pwrite_cb, inc);
+			device_pread(dev, inc->tmp, BLKSIZE, cursor, pwrite_cb, inc);
 		} else
-			device_pwrite(dev, data, D(dev)->blksize, cursor, frag_cb, frag);
+			device_pwrite(dev, data, BLKSIZE, cursor, frag_cb, frag);
 
 		offset+=bcount;
 		count-=bcount;
@@ -170,7 +168,7 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off_
 	frag_cb(frag, 0);
 }
 
-static void blockalign_pread(struct device* dev, void* data, size_t count, off_t offset, callback cb, void* cookie) {
+static void blockalign_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
 	struct fragmented* frag = (struct fragmented*) malloc(sizeof(struct fragmented));
 	memset(frag, 0 , sizeof(*frag));
 
@@ -185,11 +183,11 @@ static void blockalign_pread(struct device* dev, void* data, size_t count, off_t
 		frag->count++;
 		pthread_mutex_unlock(&frag->mutex);
 
-		uint64_t cursor=offset & D(dev)->offmask;
-		int bcount = offset+count > cursor+D(dev)->blksize ? cursor+D(dev)->blksize-offset : count;
+		uint64_t cursor=offset & OFFMASK;
+		int bcount = offset+count > cursor+BLKSIZE ? cursor+BLKSIZE-offset : count;
 				
-		if (bcount!=D(dev)->blksize) {
-			struct incomplete* inc = (struct incomplete*) malloc(sizeof(struct incomplete)+D(dev)->blksize);
+		if (bcount!=BLKSIZE) {
+			struct incomplete* inc = (struct incomplete*) malloc(sizeof(struct incomplete)+BLKSIZE);
 			memset(inc, 0 , sizeof(*inc));
 
 			inc->frag = frag;
@@ -198,9 +196,9 @@ static void blockalign_pread(struct device* dev, void* data, size_t count, off_t
 			inc->offset = offset;
 			inc->buffer = data;
 
-			device_pread(dev, inc->tmp, D(dev)->blksize, cursor, pread_cb, inc);
+			device_pread(dev, inc->tmp, BLKSIZE, cursor, pread_cb, inc);
 		} else
-			device_pread(dev, data, D(dev)->blksize, cursor, frag_cb, frag);
+			device_pread(dev, data, BLKSIZE, cursor, frag_cb, frag);
 
 		offset+=bcount;
 		count-=bcount;
@@ -222,11 +220,9 @@ static struct device_ops blockalign_device_ops = {
 	blockalign_close
 };
 
-extern void blockalign(struct device* dev, struct device* impl, int blksize) {
+extern void blockalign(struct device* dev, struct device* impl) {
 	dev->ops = &blockalign_device_ops,
 	dev->data = (struct blockalign_data*)malloc(sizeof(struct blockalign_data));
 	memset(dev->data, 0, sizeof(struct blockalign_data));
 	D(dev)->impl = impl;
-	D(dev)->blksize = blksize;
-	D(dev)->offmask = ~(((uint64_t)blksize)-1);
 }

@@ -1,12 +1,7 @@
 /*
- * Holeycow-xen
- * (c) 2010 U. Minho. Written by J. Paulo
- *
- * Based on:
- *
- * Holeycow-mysql
- * (c) 2008 José Orlando Pereira, Luís Soares
- * 
+ * HoleyCoW
+ * Copyright (c) 2008-2010 Universidade do Minho
+ * Written by José Pereira, Luis Soares, and J. Paulo
  * 
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -35,289 +30,198 @@
 #include <assert.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <stdint.h>
 
-#include "cow.h"
+#include "holeycow.h"
 #include "stability.h"
-#include "defs.h"
-#include "mytime.h"
 
-#define STAB_PORT	12345
+#define D(dev) ((struct holeycow_data*)(dev)->data)
+
 #define STAB_QUEUE	1000
 
-static int slaveid;
-static char* cow_basedir;
-
-
-struct ctap{
-
-    void* data;
-        
-};
-
-struct {
+struct holeycow_data {
 	pthread_mutex_t mutex_cow; 
 
 	/* common */
-	int storage;
-	char* storage_fname;
+	struct device* storage;
 	int *bitmap;
-
-	/* master variables */
-        struct ctap *cache;
- 
+	FILE* ctrl;
 
 	/* slave variables */
-	int snapshot;
-	char* snapshot_fname;
+	struct device* snapshot;
+};
+
+struct pending {
+	struct device* dev;
+	void* data;
+	uint64_t offset;
+	dev_callback_t cb;
+	void* cookie;
+};
  
-  
-} herd;
- 
-/* stats */
-unsigned long st_r_stab_blks;
-unsigned long st_r_reg_blks;
-unsigned long st_w_stab_blks;
-unsigned long st_w_reg_blks;
-unsigned long st_frag_blks;
-unsigned long st_fetch_blks;
-unsigned long st_c_blks;
-unsigned long st_n_blks;
-unsigned long st_n_msgs;
-
-static void* stats_thread(void* p) {
-
-	while(1) {
-		sleep(10);
-		printf("*HC* %.0lf %ld %ld %ld %ld %ld %ld %ld %ld %ld\n", 
-			now(SECONDS), 
-			st_r_reg_blks, 
-			st_w_reg_blks,
-			st_r_stab_blks,
-			st_w_stab_blks,
-			st_frag_blks,
-			st_fetch_blks,
-			st_c_blks,
-			st_n_blks,
-			st_n_msgs);
-	}
-}
-
-/*
- * no master: reg (normais), stab (atrasados pelo stab), frag
- * no slave: reg (da storage), stab (da copia), frag, fetch (adicionais)
- */
-
-static inline int test_and_set(uint64_t id) {
-        
-        int result;
+static inline int test_and_set(struct device* dev, uint64_t id) {
+		
+	int result;
 	uint64_t boff=(id&OFFMASK)>>FDBITS;
 	
-        uint64_t idx=boff/(8*sizeof(int));
+	uint64_t idx=boff/(8*sizeof(int));
 	uint64_t mask=1LLU<<(boff%(8*sizeof(int))); 
-        	
-        result=herd.bitmap[idx]&mask;
-	herd.bitmap[idx]|=mask;
-	if (!result) st_c_blks++;
+			
+	result=D(dev)->bitmap[idx]&mask;
+	D(dev)->bitmap[idx]|=mask;
 	return result;
 }
 
-static inline int test(uint64_t id) {
+static inline int test(struct device* dev, uint64_t id) {
 	
-        int result;
-       	uint64_t boff=(id&OFFMASK)>>FDBITS;
+	int result;
+   	uint64_t boff=(id&OFFMASK)>>FDBITS;
 	
 	uint64_t idx=boff/(8*sizeof(int));
 	uint64_t mask=1LLU<<(boff%(8*sizeof(int)));
 
-        result=herd.bitmap[idx]&mask;
+	result=D(dev)->bitmap[idx]&mask;
 	return result;
 }
+
+static int holeycow_close(struct device* dev) {
+
+	/* TODO: assuming that reopen is on the same order */
+	pthread_mutex_lock(&D(dev)->mutex_cow);
+	
+	device_close(D(dev)->storage);
+	device_close(D(dev)->snapshot);
+
+	// Shouldn't assume LIFO open/close order
+	pthread_mutex_unlock(&D(dev)->mutex_cow);
+	return 0;
+}
+
 
 /*************************************************************
  * MASTER Functions
  */
 
-static void master_cb(block_t id) {
+static void master_cb(block_t id, void* cookie) {
+	struct pending* pend = (struct pending*) cookie; 
 
-        FILE *fp;
+	pthread_mutex_lock(&D(pend->dev)->mutex_cow);
+	test_and_set(pend->dev, pend->offset);
+	pthread_mutex_unlock(&D(pend->dev)->mutex_cow);
 
-        int ft;
-        
-        
-        off_t offset;
-        uint64_t boff;
-        int res=0;
- 
-        pthread_mutex_lock(&herd.mutex_cow);
-        
-        offset=id&OFFMASK;
-	boff=offset>>FDBITS;
-
-        pwrite(herd.storage, herd.cache[boff].data, BLKSIZE, offset);
-	
-        free(herd.cache[boff].data);
-	herd.cache[boff].data=NULL;
-
-	st_w_stab_blks++;
-
-	fp=fopen(HLOG,"a");
-        fprintf(fp,"MASTER: storage persistent - block\n");
-        fclose(fp);
-
-        pthread_mutex_unlock(&herd.mutex_cow);
-
-
+	device_pwrite(D(pend->dev)->storage, pend->data, BLKSIZE, pend->offset, pend->cb, pend->cookie);
 }
 
-static int master_open(char* path, int flags) {
+static void master_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
 
-        int res;
-        int fdaux;
-        uint64_t maxblk;  
+	int done;
+	int ft;
+	int res;
 
-	pthread_mutex_init(&herd.mutex_cow, NULL);
+	uint64_t id=offset&OFFMASK;
+	uint64_t boff=offset>>FDBITS;
 
-	// FIXME: should propagate permission flags
-	fdaux = open(path, flags, 0644);
-	if(fdaux < 0) {
-		res = -1;
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	int copied = test(dev, id);
+	pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+	if (copied)
+		 device_pwrite(D(dev)->storage, data, count, offset, cb, cookie);
+	else {
+		struct pending* pend=(struct pending*) malloc(sizeof(struct pending)); 
+		pend->dev = dev;
+		pend->data = data;
+		pend->offset = offset;
+		pend->cb = cb;
+		pend->cookie = cookie;
+
+		add_block(id, pend);
+	}
+}
+
+static void master_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+	device_pread(D(dev)->storage, data, count, offset, cb, cookie);
+}
+
+static struct device_ops master_device_ops = {
+	master_pwrite,
+	master_pread,
+	holeycow_close
+};
+
+/*****************************************************
+ * Slave Functions
+ */
+
+static void slave_cb(block_t id, void* cookie) {
+	struct device* dev = (struct device*) cookie;
+	char buffer[BLKSIZE];
+
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	if (test(dev, id)) {
+		pthread_mutex_unlock(&D(dev)->mutex_cow);
+		return;
+	}
+	pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+	device_pread_sync(dev, buffer, BLKSIZE, id);
+
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+
+	if (!test_and_set(dev, id))
+		device_pwrite_sync(D(dev)->snapshot, buffer, BLKSIZE, id);
+
+	pthread_mutex_unlock(&D(dev)->mutex_cow);
+}
+
+static void slave_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+
+	if (!test_and_set(dev, offset)) {
+
+		int ret=device_pwrite_sync(D(dev)->snapshot, data, count, offset);
+
+		pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+		cb(cookie, ret);
 	} else {
-	
-                herd.storage=fdaux;
-		herd.storage_fname = strdup(path);
+		pthread_mutex_unlock(&D(dev)->mutex_cow);
 
-		maxblk=lseek(herd.storage, 0, SEEK_END)/BLKSIZE;
-		lseek(herd.storage, 0, SEEK_SET);
-
-		herd.bitmap=(int*)calloc(maxblk/8+sizeof(int),1);
-		herd.cache=(struct ctap*)calloc(maxblk,sizeof(struct ctap));
-
-		res = 0;
+		device_pwrite(D(dev)->snapshot, data, count, offset, cb, cookie);
 	}
-
-	return res;
 }
 
+static void slave_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	int copied = test(dev, offset);
+	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
-static int master_pwrite(int fde,void* data, size_t count, off_t offset){
-
-        int done;
-        int ft;
-        int res;
-
-      	pthread_mutex_lock(&herd.mutex_cow);
-
-        done=0;
-
-	while(count>0) {
-		uint64_t cursor=offset&OFFMASK;
-		int bcount=offset+count > cursor+BLKSIZE ?
-						cursor+BLKSIZE-offset : count;
-
-		block_t id=cursor;
-		uint64_t boff=cursor>>FDBITS;
-
-		if (test_and_set(id)) {
-                         pwrite(herd.storage, data, bcount, offset);
-                         
-			 st_w_reg_blks++;
-		} else {
-
-                         if (herd.cache[boff].data == NULL) {
-                                herd.cache[boff].data=malloc(BLKSIZE);
-                        	if (bcount!=BLKSIZE) {
-
-                                       st_frag_blks++;
-                                       //Sync
-				       pread(herd.storage, herd.cache[boff].data, BLKSIZE, cursor);
-				}
-                                             
-				add_block(id);
-                                
-                                
-			}
-                        memcpy(herd.cache[boff].data+(offset-cursor), data, bcount);
-                        //TODO If wait_sync is not commented we have deadlock here...
-                        //wait_sync(0);
-                       
-
-		}
-
-		offset+=bcount;
-		count-=bcount;
-		data+=bcount;
-                done+=bcount;
-	}
-
-     
-        pthread_mutex_unlock(&herd.mutex_cow);
-
-     	return done;
+	if (copied)
+		device_pread(D(dev)->snapshot, data, count, offset, cb, cookie);
+	else
+		device_pread(D(dev)->storage, data, count, offset, cb, cookie);
 }
 
-static int master_pread(int fde,void* data, size_t count, off_t offset){
+struct device_ops slave_device_ops = {
+	slave_pwrite,
+	slave_pread,
+	holeycow_close
+};
 
-        int done;
-        
-       
-        pthread_mutex_lock(&herd.mutex_cow);
 
-        
-	done =0;
+/*************************************************************
+ * CONTROLLER Functions
+ */
 
-	while(count>0) {
-		uint64_t cursor=offset&OFFMASK;
-		int bcount=offset+count > cursor+BLKSIZE ?
-						cursor+BLKSIZE-offset : count;
-
-		block_t id=cursor;
-		uint64_t boff=cursor>>FDBITS;
-
-                
-
-		if (herd.cache[boff].data!=NULL) {
-
-                        st_r_stab_blks++;
-                        memcpy(data, herd.cache[boff].data+(offset-cursor), bcount);
-		} else {
-                        st_r_reg_blks++;
-                        pread(herd.storage, data, bcount, offset);
-		}
-
-               
-		offset+=bcount;
-		count-=bcount;
-		data+=bcount;
-		done+=bcount;
-	}
-
-       pthread_mutex_unlock(&herd.mutex_cow);
-
-      
-	return done;
-}
-
-static int master_fsync(int dum) {
-	/* printf("MASTER: SYNCing...\n"); */
-
-	wait_sync(0);
-
-	pthread_mutex_lock(&herd.mutex_cow);
-	fsync(herd.storage);
-	pthread_mutex_unlock(&herd.mutex_cow);
-
-	/* printf("MASTER: SYNC DONE \n"); */
-
-	return 0;
-}
-
-static void master_init(int nslaves, int sz) {
-        
+static int master_init(struct device* dev, int nslaves) {
+		
 	int sfd,*fd,len,i,j,on=1;
 	struct sockaddr_in master, slave;
-                    
 
-        fd=(int*)calloc(nslaves, sizeof(int));
+	device_close(D(dev)->snapshot);
+	D(dev)->snapshot=NULL;
+
+	fd=(int*)calloc(nslaves, sizeof(int));
 
 	sfd=socket(PF_INET, SOCK_STREAM, 0);
 
@@ -327,256 +231,35 @@ static void master_init(int nslaves, int sz) {
 
 	memset(&master, 0, sizeof(master));
 	master.sin_family = PF_INET;
-	master.sin_port = htons(STAB_PORT);
-        master.sin_addr.s_addr = htonl(INADDR_ANY);
+	master.sin_port = 0;
+	master.sin_addr.s_addr = htonl(INADDR_ANY);
+		
+	listen(sfd, SOMAXCONN);
 
-        
-	while (bind(sfd, (struct sockaddr*)&master, sizeof(master))<0) {
-                perror("port 12345");
-                sleep(20);
-		//exit(1);
-	}
+	len = 0;
+	memset(&master, 0, len);
+	getsockname(sfd, (struct sockaddr *)&master, &len);
+	fprintf(D(dev)->ctrl, "ok master %s %d\n", inet_ntoa(master.sin_addr), ntohs(master.sin_port));
 
-        listen(sfd, SOMAXCONN);
-
-
-        
-        
 	for(i=0;i<nslaves;i++) {
-                len=0;
+		len=0;
 		memset(&slave, 0, sizeof(slave));
 
-                fd[i] = accept(sfd, (struct sockaddr*)&slave,(socklen_t*)&len);
-
-        }
-
-        
-	master_stab(fd, nslaves, sz, master_cb);
-}
-
-static int master_close(int dum) {
-	pthread_mutex_lock(&herd.mutex_cow);
-
-	close(herd.storage);
-	free(herd.storage_fname);
-
-	// FIXME: should't assume LIFO open/close
-	pthread_mutex_unlock(&herd.mutex_cow);
-        //ADDED
-        return 0;
-}
-
-/*****************************************************
- * Slave Functions
- */
-
-static void slave_cb(block_t id) {
-
-        FILE* fp;
-
-
-        
-	pthread_mutex_lock(&herd.mutex_cow);
-	if (!test_and_set(id)) {
-
-		char data[BLKSIZE];
-		off_t offset=id&OFFMASK;
-
-                pread(herd.storage, data, BLKSIZE, offset);
-		pwrite(herd.snapshot, data, BLKSIZE, offset);
-
-                fp=fopen(HLOG,"a");
-                fprintf(fp,"SLAVE: copied block %llu\n", id);
-                fclose(fp);
-		
-		/* update stats */
-		st_fetch_blks ++;
-
-	} /*else {
-		printf("SLAVE: block %d already copied\n", id);
-	}*/
-	pthread_mutex_unlock(&herd.mutex_cow);
-
-        
-
-
-}
-
-
-static int slave_pwrite(int fde, void* data, size_t count, off_t offset) {
-        int done;
- 
-     
-    
-	pthread_mutex_lock(&herd.mutex_cow);
-
-	done=0;
-
-	while(count>0) {
-		uint64_t cursor=offset&OFFMASK;
-		int bcount=offset+count > cursor+BLKSIZE ?
-						cursor+BLKSIZE-offset : count;
-                
-               
-
-		block_t id=cursor;
-            
-               
-		char tmp[BLKSIZE];
-		void* buf=data;
-		int ecount=bcount;
-		uint64_t eoffset=offset;
- 
-                
-		if (!test_and_set(id) && bcount!=BLKSIZE) {
-			st_frag_blks++;
-			pread(herd.storage, tmp, BLKSIZE, cursor);
-			memcpy(tmp+(offset-cursor), data, bcount);
-			buf=tmp;
-			ecount=BLKSIZE;
-			eoffset=cursor;
-                       
-		}
-
-                pwrite(herd.snapshot, buf, ecount, eoffset);
-
-                st_w_stab_blks++;
-
-		offset+=bcount;
-		count-=bcount;
-		data+=bcount;
-                done+=bcount;
+		fd[i] = accept(sfd, (struct sockaddr*)&slave,(socklen_t*)&len);
 	}
-
-	pthread_mutex_unlock(&herd.mutex_cow);
-
-      
-
-	return done;
-}
-
-static int slave_pread(int fde,void* data, size_t count, off_t offset) {
-        int done;
-
-         
-        pthread_mutex_lock(&herd.mutex_cow);
-        
-
-	done=0;
-
-	while(count>0) {
-		uint64_t cursor=offset&OFFMASK;
-		int bcount=offset+count > cursor+BLKSIZE ?
-						cursor+BLKSIZE-offset : count;
-
-        
-		block_t id=cursor;
-                int src;
-        
-
 		
-		if (test(id)) {
-        		src=herd.snapshot;
-			st_r_stab_blks++;
-		} else {
-        		src=herd.storage;
-			st_r_reg_blks++;
-		}
-		
-                pread(src, data, bcount, offset);
-
-                offset+=bcount;
-		count-=bcount;
-		data+=bcount;
-		done+=bcount;
-	}
-
-       pthread_mutex_unlock(&herd.mutex_cow);
-   
-     
-       return done;
+	master_stab(fd, nslaves, STAB_QUEUE, master_cb);
 }
 
-static int slave_fsync(int dum) {
-	/* printf("SLAVE: SYNCing...\n"); */
-
-	/* printf("SLAVE: SYNC DONE\n"); */
-
-	return 0;
-}
-
-static int slave_open(char* path, int flags) {
-
-        int res;
-	int fdaux;
-
-	pthread_mutex_init(&herd.mutex_cow, NULL);
-
-	/* TODO: what about O_RDONLY flag */
-	// FIXME: should propagate permission flags
-        
-	fdaux = open(path, flags, 0644);
-
-	if(fdaux < 0) {
-		res = fdaux;
-	} else {
-		char name[200];
-		char stats_fname[200];
-		char c;
-		char* fname;
-		int i;
-		off_t max_size, snap_size; 
-
-		/* get the filename */
-		fname = rindex(path, '/') == NULL ? path : (rindex(path, '/') +1);
-		sprintf(name, "%s%s.%d.cow", cow_basedir, fname, slaveid);
-
-		/* collect file descriptors */
-		herd.storage=fdaux;
-		herd.storage_fname = strdup(path);
-
-		herd.snapshot=open(name, O_RDWR|O_CREAT, 0644);
-		herd.snapshot_fname = strdup(name);
-
-		/* get storage size */
-		max_size = lseek(herd.storage, 0, SEEK_END);
-		snap_size = lseek(herd.snapshot, 0, SEEK_END);
-
-		/* grow snapshot to the size of the original file */
-		if(snap_size != max_size) {
-			lseek(herd.snapshot, 0, SEEK_SET);
-			lseek(herd.snapshot, max_size-1, SEEK_END);
-			read(herd.snapshot, &c, 1);
-			write(herd.snapshot, &c, 1);
-
-		}
-
-		/* reset offset to begining of storage and snapshot */
-		lseek(herd.snapshot, 0, SEEK_SET);
-		lseek(herd.storage, 0, SEEK_SET);
-
-		/* create the bitmap */
-		herd.bitmap=(int*)calloc((max_size/BLKSIZE)/8+sizeof(int), 1);
-
-		res = 0;
-	}
-
-	return res;
-}
-
-static void slave_init(char* addr, int sz, char* p_cow_basedir) {
+static void slave_init(struct device* dev, char* addr, int port) {
 	int fd;
 	struct sockaddr_in master;
-	char* append;
-
-	cow_basedir = (char*) malloc(strlen(p_cow_basedir) * sizeof(char) + 1);
-	sprintf(cow_basedir, "%s/", p_cow_basedir);
 
 	fd=socket(PF_INET, SOCK_STREAM, 0);
 
 	memset(&master, 0, sizeof(master));
 	master.sin_family = AF_INET;
-	master.sin_port = htons(STAB_PORT);
+	master.sin_port = htons(port);
 	inet_aton(addr, &master.sin_addr);
 
 	if (connect(fd, (struct sockaddr*)&master, sizeof(master))<0) {
@@ -584,26 +267,56 @@ static void slave_init(char* addr, int sz, char* p_cow_basedir) {
 		exit(1);
 	}
 
-	/* stats */
-	timer_start(0);
+	fprintf(D(dev)->ctrl, "ok slave\n");
 
-	slaveid=slave_stab(fd, sz, slave_cb);
+	slave_stab(fd, STAB_QUEUE, slave_cb, dev);
 }
 
-static int slave_close(int dum) {
+static void* ctrl_thread(void* arg) {
+	struct device* dev = (struct device*) arg;
+	char buffer[100];
+	char* cmd[10], i;
 
-	/* TODO: assuming that reopen is on the same order */
-	pthread_mutex_lock(&herd.mutex_cow);
-	
-	close(herd.storage);
-	close(herd.snapshot);
+	fprintf(D(dev)->ctrl, "ready\n");
 
-	free(herd.storage_fname);
-	free(herd.snapshot_fname);
+	while(fgets(buffer, 100, D(dev)->ctrl)!=NULL) {
+		i=0;
+		cmd[i]=strtok(buffer, " \t\n");
+		while(cmd[i]!=NULL)
+			cmd[++i]=strtok(NULL, " \t\n");
 
-	// Shouldn't assume LIFO open/close order
-	pthread_mutex_unlock(&herd.mutex_cow);
-        //ADDED
-        return 0;
+		if (i==2 && !strcmp(cmd[0], "master"))
+			master_init(dev, atoi(cmd[1]));
+		else if (i==2 && !strcmp(cmd[0], "slave"))
+			slave_init(dev, cmd[1], atoi(cmd[2]));
+	}
+
+	// DANGER! Lost connection to controller.
+
+	exit(1);
+}
+
+/*************************************************************
+ * API
+ */
+
+int holey_open(struct device* dev, struct device* storage, struct device* snapshot, uint64_t max_size, int ctrlfd) {
+	pthread_t thread;
+
+	dev->data = malloc(sizeof(struct holeycow_data));
+	dev->ops = NULL;
+
+	memset(&dev->data, 0, sizeof(struct holeycow_data));
+	D(dev)->storage = storage;
+	D(dev)->snapshot = snapshot;
+	D(dev)->ctrl = fdopen(ctrlfd, "r+");
+
+	/* create the bitmap */
+	D(dev)->bitmap=(int*)calloc((max_size/BLKSIZE)/8+sizeof(int), 1);
+
+	pthread_create(&thread, NULL, ctrl_thread, dev);
+	pthread_detach(thread);
+
+	return 0;
 }
 
