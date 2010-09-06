@@ -35,6 +35,7 @@ int main(int argc, char* argv[]) {
 	int fd;
 	struct device storage, snapshot, cow, ba;
 	uint64_t max_size;
+	struct sockaddr_in coord;
 
 	if (argc!=3) {
 		fprintf(stderr, "usage: benchmark storage snapshot\n");
@@ -45,10 +46,22 @@ int main(int argc, char* argv[]) {
 	workload_init(fd);
 	max_size=lseek(fd, 0, SEEK_END);
 	close(fd);
+
+	fd=socket(PF_INET, SOCK_STREAM, 0);
+
+	memset(&coord, 0, sizeof(struct sockaddr_in));
+	coord.sin_family = AF_INET;
+	coord.sin_port = htons(12345);
+	inet_aton("127.0.0.1", &coord.sin_addr);
+
+	if (connect(fd, (struct sockaddr*) &coord, sizeof(struct sockaddr_in))<0) {
+		perror("connect coordination");
+		exit(1);
+	}
 	
 	posixbe_open(&storage, argv[1], O_RDWR);
 	posixbe_open(&snapshot, argv[2], O_RDWR);
-	holey_open(&cow, &storage, &snapshot, max_size, 0);
+	holey_open(&cow, &storage, &snapshot, max_size, fd);
 	blockalign(&ba, &cow);
 
 	workload(&ba);

@@ -231,7 +231,8 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 		}
 	}
 
-	fprintf(D(dev)->ctrl, "ok master\n");
+	fprintf(D(dev)->ctrl, "copying\n");
+	fflush(D(dev)->ctrl);:
 		
 	master_stab(fd, nslaves, STAB_QUEUE, master_cb);
 
@@ -261,6 +262,7 @@ static void pre_init(struct device* dev) {
 	getsockname(D(dev)->sfd, (struct sockaddr *)&slave, &len);
 
 	fprintf(D(dev)->ctrl, "ok %s %d\n", inet_ntoa(slave.sin_addr), ntohs(slave.sin_port));
+	fflish(D(dev)->ctrl);
 }
 
 static void slave_init(struct device* dev) {
