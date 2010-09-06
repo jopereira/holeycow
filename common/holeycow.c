@@ -228,15 +228,9 @@ static int master_init(struct device* dev, int nslaves) {
 		perror("setsockopt(SO_REUSEADDR) failed");
 	}
 
-	memset(&master, 0, sizeof(master));
-	master.sin_family = PF_INET;
-	master.sin_port = 0;
-	master.sin_addr.s_addr = htonl(INADDR_ANY);
-	bind(sfd, (struct sockaddr*) &master, sizeof(struct sockaddr_in));
-		
 	listen(sfd, SOMAXCONN);
 
-	len = 0;
+	len = sizeof(struct sockaddr_in);
 	memset(&master, 0, len);
 	getsockname(sfd, (struct sockaddr *)&master, &len);
 	fprintf(D(dev)->ctrl, "ok master %s %d\n", inet_ntoa(master.sin_addr), ntohs(master.sin_port));
@@ -306,7 +300,7 @@ static void* ctrl_thread(void* arg) {
 
 		if (i==2 && !strcmp(cmd[0], "master"))
 			master_init(dev, atoi(cmd[1]));
-		else if (i==2 && !strcmp(cmd[0], "slave"))
+		else if (i==3 && !strcmp(cmd[0], "slave"))
 			slave_init(dev, cmd[1], atoi(cmd[2]));
 	}
 
