@@ -2,7 +2,7 @@
 CFLAGS = -I../../common
 LD_FLAGS = -L../../common -lholeycow -lpthread
 
-OBJS = main.o workload.o
+OBJS = main.o workload.o ../../backend/posix/posixbe.o
 
 all: benchmark
 

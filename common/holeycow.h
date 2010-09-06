@@ -22,6 +22,7 @@
 #define __COW__
 
 #include <sys/types.h>
+#include <stdint.h>
 
 #define FDBITS 12
 
@@ -58,6 +59,6 @@ extern int device_pread_sync(struct device*, void*, size_t, off_t);
 /* Enforce block aligned I/O */
 extern void blockalign(struct device*, struct device*);
 
-void holey_init(int profile, char* master_ip, int n_slaves, char* cow_basedir);
+int holey_open(struct device* dev, struct device* storage, struct device* snapshot, uint64_t max_size, int ctrlfd);
 
 #endif

@@ -41,7 +41,7 @@ static void sync_cb(void* cookie, int ret) {
 	pthread_mutex_lock(&data->mutex);
 	data->flag = 1;
 	data->ret = ret;
-	pthread_cond_notify(&data->cond);
+	pthread_cond_signal(&data->cond);
 	pthread_mutex_unlock(&data->mutex);
 }
 

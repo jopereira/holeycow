@@ -17,6 +17,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+#define _GNU_SOURCE
+
 #include <sys/types.h> 
 #include <sys/socket.h> 
 #include <netinet/in.h>
@@ -27,25 +29,30 @@
 #include <fcntl.h>
 #include <assert.h>
 
-#include <cow.h>
+#include <holeycow.h>
 
 int main(int argc, char* argv[]) {
 	int fd;
+	struct device storage, snapshot, cow, ba;
+	uint64_t max_size;
 
 	if (argc!=3) {
-		fprintf(stderr, "usage: master ncopiers file\n");
+		fprintf(stderr, "usage: benchmark storage snapshot\n");
 		exit(1);
 	}
 
 	fd=open(argv[2], O_RDWR);
 	workload_init(fd);
+	max_size=lseek(fd, 0, SEEK_END);
 	close(fd);
+	
+	posixbe_open(&storage, argv[1], O_RDWR | O_DIRECT);
+	posixbe_open(&snapshot, argv[2], O_RDWR);
+	holey_open(&cow, &storage, &snapshot, max_size, 0);
+	blockalign(&ba, &cow);
 
-	holey_init(HOLEY_SERVER_STATUS_MASTER, NULL, atoi(argv[1]), NULL);
+	workload(&ba);
 
-	fd=holey_open(argv[2], O_RDWR);
-
-	holey_start(1);
-
-	workload(fd);
+	while(1)
+		pause();
 }

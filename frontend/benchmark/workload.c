@@ -27,28 +27,27 @@
 #include <fcntl.h>
 #include <assert.h>
 
-#include "cow.h"
+#include "holeycow.h"
 
 #define MAXBLK 1024
 #define MAXTHR 100
 
 void* workload_thread(void* p) {
-	int fd=(int)p;
+	struct device* dev = (struct device*)p;
 	char bogus[BLKSIZE];
 	int i,j;
 
 	for(i=0;i<100;i++) {
 		for(j=0;j<10;j++) {
 			int id=(random()%MAXBLK)|(random()%MAXBLK);
-			holey_pread(fd, bogus, BLKSIZE, id*BLKSIZE);
+			device_pread_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
 			if (*(int*)bogus!=id) {
 				printf("expected %d got %d\n", id, *(int*)bogus);
 				exit(1);
 			}
-			holey_pwrite(fd, bogus, BLKSIZE, id*BLKSIZE);
+			device_pread_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
 			usleep(10000);
 		}
-		holey_fsync(fd);
 	}
 }
 
@@ -59,12 +58,12 @@ void workload_init(int fd) {
 		pwrite(fd, &i, sizeof(i), i*BLKSIZE);
 }
 
-void workload(int fd) {
+void workload(struct device* dev) {
 	int i;
 	pthread_t load[MAXTHR];
 
 	for(i=0;i<MAXTHR;i++)
-		pthread_create(&load[i], NULL, workload_thread, (void*)fd);
+		pthread_create(&load[i], NULL, workload_thread, dev);
 	for(i=0;i<MAXTHR;i++)
 		pthread_join(load[i], NULL);
 }
