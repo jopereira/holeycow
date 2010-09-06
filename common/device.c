@@ -122,7 +122,7 @@ static void frag_cb(void* cookie, int ret) {
 		pthread_mutex_destroy(&frag->mutex);
 		free(frag);
 	} else
-		pthread_mutex_lock(&frag->mutex);
+		pthread_mutex_unlock(&frag->mutex);
 }
 
 static void cleanup_cb(void* cookie, int ret) {
@@ -175,9 +175,9 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off_
 			inc->offset = offset;
 			inc->buffer = data;
 
-			device_pread(dev, inc->tmp, BLKSIZE, cursor, pwrite_cb, inc);
+			device_pread(D(dev)->impl, inc->tmp, BLKSIZE, cursor, pwrite_cb, inc);
 		} else
-			device_pwrite(dev, data, BLKSIZE, cursor, frag_cb, frag);
+			device_pwrite(D(dev)->impl, data, BLKSIZE, cursor, frag_cb, frag);
 
 		offset+=bcount;
 		count-=bcount;
@@ -215,9 +215,9 @@ static void blockalign_pread(struct device* dev, void* data, size_t count, off_t
 			inc->offset = offset;
 			inc->buffer = data;
 
-			device_pread(dev, inc->tmp, BLKSIZE, cursor, pread_cb, inc);
+			device_pread(D(dev)->impl, inc->tmp, BLKSIZE, cursor, pread_cb, inc);
 		} else
-			device_pread(dev, data, BLKSIZE, cursor, frag_cb, frag);
+			device_pread(D(dev)->impl, data, BLKSIZE, cursor, frag_cb, frag);
 
 		offset+=bcount;
 		count-=bcount;

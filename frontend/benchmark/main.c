@@ -41,12 +41,12 @@ int main(int argc, char* argv[]) {
 		exit(1);
 	}
 
-	fd=open(argv[2], O_RDWR);
+	fd=open(argv[1], O_RDWR);
 	workload_init(fd);
 	max_size=lseek(fd, 0, SEEK_END);
 	close(fd);
 	
-	posixbe_open(&storage, argv[1], O_RDWR | O_DIRECT);
+	posixbe_open(&storage, argv[1], O_RDWR);
 	posixbe_open(&snapshot, argv[2], O_RDWR);
 	holey_open(&cow, &storage, &snapshot, max_size, 0);
 	blockalign(&ba, &cow);

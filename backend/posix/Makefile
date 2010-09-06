@@ -1,5 +1,5 @@
 
-CFLAGS = -I../../common
+CFLAGS = -g -I../../common
 
 OBJS = posixbe.o
 

@@ -40,9 +40,11 @@
 #define STAB_QUEUE	1000
 
 struct holeycow_data {
-	pthread_mutex_t mutex_cow; 
-
 	/* common */
+	pthread_mutex_t mutex_cow; 
+	pthread_cond_t init; 
+	int ready;
+
 	struct device* storage;
 	int *bitmap;
 	FILE* ctrl;
@@ -218,9 +220,6 @@ static int master_init(struct device* dev, int nslaves) {
 	int sfd,*fd,len,i,j,on=1;
 	struct sockaddr_in master, slave;
 
-	device_close(D(dev)->snapshot);
-	D(dev)->snapshot=NULL;
-
 	fd=(int*)calloc(nslaves, sizeof(int));
 
 	sfd=socket(PF_INET, SOCK_STREAM, 0);
@@ -233,6 +232,7 @@ static int master_init(struct device* dev, int nslaves) {
 	master.sin_family = PF_INET;
 	master.sin_port = 0;
 	master.sin_addr.s_addr = htonl(INADDR_ANY);
+	bind(sfd, (struct sockaddr*) &master, sizeof(struct sockaddr_in));
 		
 	listen(sfd, SOMAXCONN);
 
@@ -247,8 +247,20 @@ static int master_init(struct device* dev, int nslaves) {
 
 		fd[i] = accept(sfd, (struct sockaddr*)&slave,(socklen_t*)&len);
 	}
+
+	close(sfd);
 		
 	master_stab(fd, nslaves, STAB_QUEUE, master_cb);
+
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+
+	dev->ops = &master_device_ops;
+	D(dev)->ready = 1;
+	device_close(D(dev)->snapshot);
+	D(dev)->snapshot=NULL;
+
+	pthread_cond_broadcast(&D(dev)->init);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
 }
 
 static void slave_init(struct device* dev, char* addr, int port) {
@@ -270,6 +282,13 @@ static void slave_init(struct device* dev, char* addr, int port) {
 	fprintf(D(dev)->ctrl, "ok slave\n");
 
 	slave_stab(fd, STAB_QUEUE, slave_cb, dev);
+
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	dev->ops = &slave_device_ops;
+	D(dev)->ready = 1;
+
+	pthread_cond_broadcast(&D(dev)->init);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
 }
 
 static void* ctrl_thread(void* arg) {
@@ -296,6 +315,28 @@ static void* ctrl_thread(void* arg) {
 	exit(1);
 }
 
+static void init_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	while(!D(dev)->ready)
+		pthread_cond_wait(&D(dev)->init, &D(dev)->mutex_cow);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
+	dev->ops->pwrite(dev, data, count, offset, cb, cookie);
+}
+
+static void init_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	while(!D(dev)->ready)
+		pthread_cond_wait(&D(dev)->init, &D(dev)->mutex_cow);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
+	dev->ops->pread(dev, data, count, offset, cb, cookie);
+}
+
+struct device_ops init_device_ops = {
+	init_pwrite,
+	init_pread,
+	holeycow_close
+};
+
 /*************************************************************
  * API
  */
@@ -304,9 +345,11 @@ int holey_open(struct device* dev, struct device* storage, struct device* snapsh
 	pthread_t thread;
 
 	dev->data = malloc(sizeof(struct holeycow_data));
-	dev->ops = NULL;
+	dev->ops = &init_device_ops;
 
-	memset(&dev->data, 0, sizeof(struct holeycow_data));
+	memset(dev->data, 0, sizeof(struct holeycow_data));
+	pthread_mutex_init(&D(dev)->mutex_cow, NULL);
+	pthread_cond_init(&D(dev)->init, NULL);
 	D(dev)->storage = storage;
 	D(dev)->snapshot = snapshot;
 	D(dev)->ctrl = fdopen(ctrlfd, "r+");

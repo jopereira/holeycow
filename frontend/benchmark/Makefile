@@ -1,12 +1,12 @@
 
-CFLAGS = -I../../common
+CFLAGS = -g -I../../common
 LD_FLAGS = -L../../common -lholeycow -lpthread
 
 OBJS = main.o workload.o ../../backend/posix/posixbe.o
 
 all: benchmark
 
-benchmark: $(OBJS)
+benchmark: $(OBJS) ../../common/libholeycow.a
 	gcc $(OBJS) -o benchmark $(LD_FLAGS)
 
 clean:

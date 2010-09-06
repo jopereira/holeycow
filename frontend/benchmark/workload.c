@@ -48,6 +48,8 @@ void* workload_thread(void* p) {
 			device_pread_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
 			usleep(10000);
 		}
+		printf(".");
+		fflush(stdout);
 	}
 }
 
