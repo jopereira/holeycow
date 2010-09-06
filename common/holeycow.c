@@ -215,34 +215,22 @@ struct device_ops slave_device_ops = {
  * CONTROLLER Functions
  */
 
-static int master_init(struct device* dev, int nslaves) {
-		
-	int sfd,*fd,len,i,j,on=1;
-	struct sockaddr_in master, slave;
+static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slave) {
+	int i, *fd;
+	struct sockaddr_in master;
 
 	fd=(int*)calloc(nslaves, sizeof(int));
 
-	sfd=socket(PF_INET, SOCK_STREAM, 0);
-
-	if (setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
-		perror("setsockopt(SO_REUSEADDR) failed");
-	}
-
-	listen(sfd, SOMAXCONN);
-
-	len = sizeof(struct sockaddr_in);
-	memset(&master, 0, len);
-	getsockname(sfd, (struct sockaddr *)&master, &len);
-	fprintf(D(dev)->ctrl, "ok master %s %d\n", inet_ntoa(master.sin_addr), ntohs(master.sin_port));
-
 	for(i=0;i<nslaves;i++) {
-		len=0;
-		memset(&slave, 0, sizeof(slave));
+		fd[i]=socket(PF_INET, SOCK_STREAM, 0);
 
-		fd[i] = accept(sfd, (struct sockaddr*)&slave,(socklen_t*)&len);
+		if (connect(fd[i], (struct sockaddr*) slave+i, sizeof(struct sockaddr_in))<0) {
+			perror("connect slave");
+			exit(1);
+		}
 	}
 
-	close(sfd);
+	fprintf(D(dev)->ctrl, "ok master\n");
 		
 	master_stab(fd, nslaves, STAB_QUEUE, master_cb);
 
@@ -259,24 +247,24 @@ static int master_init(struct device* dev, int nslaves) {
 	master_start(5);
 }
 
-static void slave_init(struct device* dev, char* addr, int port) {
-	int fd;
-	struct sockaddr_in master;
+static void slave_init(struct device* dev) {
+	int sfd,fd,len;
+	struct sockaddr_in slave, master;
 
-	fd=socket(PF_INET, SOCK_STREAM, 0);
+	sfd=socket(PF_INET, SOCK_STREAM, 0);
 
-	memset(&master, 0, sizeof(master));
-	master.sin_family = AF_INET;
-	master.sin_port = htons(port);
-	inet_aton(addr, &master.sin_addr);
+	listen(sfd, SOMAXCONN);
 
-	if (connect(fd, (struct sockaddr*)&master, sizeof(master))<0) {
-		perror(addr);
-		exit(1);
-	}
+	len = sizeof(struct sockaddr_in);
+	memset(&slave, 0, len);
+	getsockname(sfd, (struct sockaddr *)&slave, &len);
 
-	fprintf(D(dev)->ctrl, "ok slave\n");
+	fprintf(D(dev)->ctrl, "ok slave %s %d\n", inet_ntoa(slave.sin_addr), ntohs(slave.sin_port));
 
+	len=0;
+	memset(&slave, 0, sizeof(slave));
+
+	fd = accept(sfd, (struct sockaddr*)&master, (socklen_t*)&len);
 	slave_stab(fd, STAB_QUEUE, slave_cb, dev);
 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
@@ -292,7 +280,8 @@ static void slave_init(struct device* dev, char* addr, int port) {
 static void* ctrl_thread(void* arg) {
 	struct device* dev = (struct device*) arg;
 	char buffer[100];
-	char* cmd[10], i;
+	char* cmd[10], i, j;
+	struct sockaddr_in slave[10];
 
 	fprintf(D(dev)->ctrl, "ready\n");
 
@@ -302,10 +291,17 @@ static void* ctrl_thread(void* arg) {
 		while(cmd[i]!=NULL)
 			cmd[++i]=strtok(NULL, " \t\n");
 
-		if (i==2 && !strcmp(cmd[0], "master"))
-			master_init(dev, atoi(cmd[1]));
-		else if (i==3 && !strcmp(cmd[0], "slave"))
-			slave_init(dev, cmd[1], atoi(cmd[2]));
+		if (!strcmp(cmd[0], "master")) {
+			for(j=0;j<(i-1)/2;j++) {
+				memset(slave+j, 0, sizeof(struct sockaddr_in));
+				slave[j].sin_family = AF_INET;
+				slave[j].sin_port = htons(atoi(cmd[j*2+2]));
+				inet_aton(cmd[j*2+1], &slave[j].sin_addr);
+			}
+			master_init(dev, j, slave);
+		} else if (!strcmp(cmd[0], "slave"))
+			slave_init(dev);
+
 	}
 
 	// DANGER! Lost connection to controller.
