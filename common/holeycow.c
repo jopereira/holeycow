@@ -255,6 +255,8 @@ static int master_init(struct device* dev, int nslaves) {
 
 	pthread_cond_broadcast(&D(dev)->init);
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+	master_start(5);
 }
 
 static void slave_init(struct device* dev, char* addr, int port) {
@@ -283,6 +285,8 @@ static void slave_init(struct device* dev, char* addr, int port) {
 
 	pthread_cond_broadcast(&D(dev)->init);
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+	slave_start(5);
 }
 
 static void* ctrl_thread(void* arg) {

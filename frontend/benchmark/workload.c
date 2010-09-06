@@ -45,7 +45,7 @@ void* workload_thread(void* p) {
 				printf("expected %d got %d\n", id, *(int*)bogus);
 				exit(1);
 			}
-			device_pread_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
+			device_pwrite_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
 			usleep(10000);
 		}
 		printf(".");

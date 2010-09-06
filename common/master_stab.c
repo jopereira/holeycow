@@ -197,7 +197,7 @@ void master_start(int npool) {
 
 int add_block(block_t id, void* cookie) {
 	int result;
-       
+
 	pthread_mutex_lock(&mux);
 
 	assert(rn!=max);
@@ -213,9 +213,14 @@ int add_block(block_t id, void* cookie) {
 
 	pthread_cond_signal(&notempty);
 
+	if (slaves==0) {
+		rn++;
+		pthread_cond_signal(&ready);
+	}
+
 	pthread_mutex_unlock(&mux);
 
-       	return result;
+     	return result;
 }
 
 void wait_sync(int dump) {
