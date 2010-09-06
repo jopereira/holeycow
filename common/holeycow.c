@@ -50,6 +50,7 @@ struct holeycow_data {
 	FILE* ctrl;
 
 	/* slave variables */
+	int sfd;
 	struct device* snapshot;
 };
 
@@ -247,24 +248,29 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 	master_start(5);
 }
 
-static void slave_init(struct device* dev) {
-	int sfd,fd,len;
-	struct sockaddr_in slave, master;
+static void pre_init(struct device* dev) {
+	int len;
+	struct sockaddr_in slave;
 
-	sfd=socket(PF_INET, SOCK_STREAM, 0);
+	D(dev)->sfd=socket(PF_INET, SOCK_STREAM, 0);
 
-	listen(sfd, SOMAXCONN);
+	listen(D(dev)->sfd, SOMAXCONN);
 
 	len = sizeof(struct sockaddr_in);
 	memset(&slave, 0, len);
-	getsockname(sfd, (struct sockaddr *)&slave, &len);
+	getsockname(D(dev)->sfd, (struct sockaddr *)&slave, &len);
 
-	fprintf(D(dev)->ctrl, "ok slave %s %d\n", inet_ntoa(slave.sin_addr), ntohs(slave.sin_port));
+	fprintf(D(dev)->ctrl, "ok %s %d\n", inet_ntoa(slave.sin_addr), ntohs(slave.sin_port));
+}
 
-	len=0;
-	memset(&slave, 0, sizeof(slave));
+static void slave_init(struct device* dev) {
+	int fd, len;
+	struct sockaddr_in master;
 
-	fd = accept(sfd, (struct sockaddr*)&master, (socklen_t*)&len);
+	len=sizeof(master);
+	memset(&master, 0, sizeof(master));
+
+	fd = accept(D(dev)->sfd, (struct sockaddr*)&master, (socklen_t*)&len);
 	slave_stab(fd, STAB_QUEUE, slave_cb, dev);
 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
@@ -283,7 +289,7 @@ static void* ctrl_thread(void* arg) {
 	char* cmd[10], i, j;
 	struct sockaddr_in slave[10];
 
-	fprintf(D(dev)->ctrl, "ready\n");
+	pre_init(dev);
 
 	while(fgets(buffer, 100, D(dev)->ctrl)!=NULL) {
 		i=0;
@@ -291,7 +297,7 @@ static void* ctrl_thread(void* arg) {
 		while(cmd[i]!=NULL)
 			cmd[++i]=strtok(NULL, " \t\n");
 
-		if (!strcmp(cmd[0], "master")) {
+		if (!strcmp(cmd[0], "makewriter")) {
 			for(j=0;j<(i-1)/2;j++) {
 				memset(slave+j, 0, sizeof(struct sockaddr_in));
 				slave[j].sin_family = AF_INET;
@@ -299,7 +305,7 @@ static void* ctrl_thread(void* arg) {
 				inet_aton(cmd[j*2+1], &slave[j].sin_addr);
 			}
 			master_init(dev, j, slave);
-		} else if (!strcmp(cmd[0], "slave"))
+		} else if (!strcmp(cmd[0], "makecopier"))
 			slave_init(dev);
 
 	}
