@@ -64,10 +64,9 @@ static void* sender_thread(void* p) {
 
 	while(1) {
 
-                int size;
+		int size;
 		while(sn==0)
 			pthread_cond_wait(&notempty, &mux);
-
                 
 		size=sn>500?500:sn;
 		if (st+size>max)
@@ -85,8 +84,6 @@ static void* sender_thread(void* p) {
 		sn-=size;
 	}
 }
-
-
 
 static int receive(int id) {
 	int result, r=0;
@@ -130,11 +127,9 @@ static void* pool_thread(void* p) {
 	pthread_mutex_lock(&mux);
 	while(1) {
 
-                int idx;
+		int idx;
 		while(rn==0)
 			pthread_cond_wait(&ready, &mux);
-
-
                       
 		idx=rt;
 		rt=(rt+1)%max;
@@ -192,6 +187,24 @@ void master_start(int npool) {
 	started = 1;
 }
 
+void add_slave(int fd) {
+	pthread_mutex_lock(&mux);
+
+	assert(rn == 0 && sn == 0 && fn == 0);
+
+	slaves++;
+
+	sock = (int*) realloc(sock, sizeof(int)*slaves);
+	sock[slaves-1] = fd;
+
+	sizes = (int*) realloc(sizes, sizeof(int)*slaves);
+	sizes[slaves-1] = 0;
+
+	pthread_create(&receiver, NULL, receiver_thread, (void*)(slaves-1));
+
+	pthread_mutex_unlock(&mux);
+}
+
 int add_block(block_t id, void* cookie) {
 	int result;
 
@@ -217,7 +230,7 @@ int add_block(block_t id, void* cookie) {
 
 	pthread_mutex_unlock(&mux);
 
-     	return result;
+	return result;
 }
 
 void wait_sync(int dump) {

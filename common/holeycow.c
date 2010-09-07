@@ -42,12 +42,17 @@
 struct holeycow_data {
 	/* common */
 	pthread_mutex_t mutex_cow; 
-	pthread_cond_t init; 
+	pthread_cond_t init;
 	int ready;
 
 	struct device* storage;
 	int *bitmap;
+	uint64_t max_size;
 	FILE* ctrl;
+
+	/* master variables */
+	pthread_cond_t blocked;
+	int pw;
 
 	/* slave variables */
 	int sfd;
@@ -105,6 +110,18 @@ static int holeycow_close(struct device* dev) {
  * MASTER Functions
  */
 
+static void master_cb2(void* cookie, int ret) {
+	struct pending* pend = (struct pending*) cookie; 
+
+	pthread_mutex_lock(&D(pend->dev)->mutex_cow);
+	if (--D(pend->dev)->pw == 0)
+		pthread_cond_broadcast(&D(pend->dev)->blocked);
+	pthread_mutex_unlock(&D(pend->dev)->mutex_cow);
+
+	pend->cb(pend->cookie, ret);
+	free(pend);
+}
+
 static void master_cb(block_t id, void* cookie) {
 	struct pending* pend = (struct pending*) cookie; 
 
@@ -112,7 +129,7 @@ static void master_cb(block_t id, void* cookie) {
 	test_and_set(pend->dev, pend->offset);
 	pthread_mutex_unlock(&D(pend->dev)->mutex_cow);
 
-	device_pwrite(D(pend->dev)->storage, pend->data, BLKSIZE, pend->offset, pend->cb, pend->cookie);
+	device_pwrite(D(pend->dev)->storage, pend->data, BLKSIZE, pend->offset, master_cb2, pend);
 }
 
 static void master_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
@@ -126,20 +143,20 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off_t of
 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	int copied = test(dev, id);
+	D(dev)->pw++;
 	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
-	if (copied)
-		 device_pwrite(D(dev)->storage, data, count, offset, cb, cookie);
-	else {
-		struct pending* pend=(struct pending*) malloc(sizeof(struct pending)); 
-		pend->dev = dev;
-		pend->data = data;
-		pend->offset = offset;
-		pend->cb = cb;
-		pend->cookie = cookie;
+	struct pending* pend=(struct pending*) malloc(sizeof(struct pending)); 
+	pend->dev = dev;
+	pend->data = data;
+	pend->offset = offset;
+	pend->cb = cb;
+	pend->cookie = cookie;
 
+	if (copied)
+		device_pwrite(D(dev)->storage, data, count, offset, master_cb2, pend);
+	else
 		add_block(id, pend);
-	}
 }
 
 static void master_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
@@ -211,6 +228,31 @@ struct device_ops slave_device_ops = {
 	holeycow_close
 };
 
+/*************************************************************
+ * Blocked state
+ */
+
+static void init_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	while(!D(dev)->ready)
+		pthread_cond_wait(&D(dev)->init, &D(dev)->mutex_cow);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
+	dev->ops->pwrite(dev, data, count, offset, cb, cookie);
+}
+
+static void init_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	while(!D(dev)->ready)
+		pthread_cond_wait(&D(dev)->init, &D(dev)->mutex_cow);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
+	dev->ops->pread(dev, data, count, offset, cb, cookie);
+}
+
+struct device_ops init_device_ops = {
+	init_pwrite,
+	init_pread,
+	holeycow_close
+};
 
 /*************************************************************
  * CONTROLLER Functions
@@ -232,7 +274,7 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 	}
 
 	fprintf(D(dev)->ctrl, "copying\n");
-	fflush(D(dev)->ctrl);:
+	fflush(D(dev)->ctrl);
 		
 	master_stab(fd, nslaves, STAB_QUEUE, master_cb);
 
@@ -249,6 +291,37 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 	master_start(5);
 }
 
+static int master_add_slave(struct device* dev, struct sockaddr_in* slave) {
+	int fd;
+
+	// Block and flush pending writes
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	D(dev)->ready = 0;
+	dev->ops = &init_device_ops;
+	while(D(dev)->pw>0)
+		pthread_cond_wait(&D(dev)->blocked, &D(dev)->mutex_cow);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+	// Reconfigure
+	fd=socket(PF_INET, SOCK_STREAM, 0);
+	if (connect(fd, (struct sockaddr*) slave, sizeof(struct sockaddr_in))<0) {
+		perror("connect slave");
+		exit(1);
+	}
+
+	add_slave(fd);
+	memset(D(dev)->bitmap, 0, (D(dev)->max_size/BLKSIZE)/8+sizeof(int));
+
+	fprintf(D(dev)->ctrl, "copying\n");
+	fflush(D(dev)->ctrl);
+
+	// Restart writes
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	D(dev)->ready = 1;
+	dev->ops = &master_device_ops;
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
+}
+
 static void pre_init(struct device* dev) {
 	int len;
 	struct sockaddr_in slave;
@@ -262,7 +335,7 @@ static void pre_init(struct device* dev) {
 	getsockname(D(dev)->sfd, (struct sockaddr *)&slave, &len);
 
 	fprintf(D(dev)->ctrl, "ok %s %d\n", inet_ntoa(slave.sin_addr), ntohs(slave.sin_port));
-	fflish(D(dev)->ctrl);
+	fflush(D(dev)->ctrl);
 }
 
 static void slave_init(struct device* dev) {
@@ -309,6 +382,13 @@ static void* ctrl_thread(void* arg) {
 			master_init(dev, j, slave);
 		} else if (!strcmp(cmd[0], "makecopier"))
 			slave_init(dev);
+		else if (!strcmp(cmd[0], "recovered")) {
+			memset(slave, 0, sizeof(struct sockaddr_in));
+			slave[0].sin_family = AF_INET;
+			slave[0].sin_port = htons(atoi(cmd[2]));
+			inet_aton(cmd[1], &slave[0].sin_addr);
+			master_add_slave(dev, slave);
+		}
 
 	}
 
@@ -316,28 +396,6 @@ static void* ctrl_thread(void* arg) {
 
 	exit(1);
 }
-
-static void init_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
-	while(!D(dev)->ready)
-		pthread_cond_wait(&D(dev)->init, &D(dev)->mutex_cow);
-  	pthread_mutex_unlock(&D(dev)->mutex_cow);
-	dev->ops->pwrite(dev, data, count, offset, cb, cookie);
-}
-
-static void init_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
-	while(!D(dev)->ready)
-		pthread_cond_wait(&D(dev)->init, &D(dev)->mutex_cow);
-  	pthread_mutex_unlock(&D(dev)->mutex_cow);
-	dev->ops->pread(dev, data, count, offset, cb, cookie);
-}
-
-struct device_ops init_device_ops = {
-	init_pwrite,
-	init_pread,
-	holeycow_close
-};
 
 /*************************************************************
  * API
@@ -355,6 +413,7 @@ int holey_open(struct device* dev, struct device* storage, struct device* snapsh
 	D(dev)->storage = storage;
 	D(dev)->snapshot = snapshot;
 	D(dev)->ctrl = fdopen(ctrlfd, "r+");
+	D(dev)->max_size = max_size;
 
 	/* create the bitmap */
 	D(dev)->bitmap=(int*)calloc((max_size/BLKSIZE)/8+sizeof(int), 1);
