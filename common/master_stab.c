@@ -18,6 +18,10 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+#include <sys/types.h> 
+#include <sys/socket.h> 
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <assert.h>
@@ -34,7 +38,13 @@ static int max, h;		/* capacity and head */
 static int st, sn;		/* sender tail and size */
 static int rt, rn;		/* receiver tail and size */
 static int ft, fn;		/* fsync tail and size */
-static int* sizes;		/* tokens from slaves */
+
+static struct slave {
+	int size;			/* tokens from slaves */
+	int sock;
+	struct sockaddr_in* addr;
+	struct slave* next;
+} *slaves;
 
 static int eh, et;		/* epoch for sync (h=eh%max, ft=et%max) */
 
@@ -43,17 +53,14 @@ static int started = 0;
 static pthread_mutex_t mux;
 static pthread_cond_t notempty, ready, sync1;
 
-static int* sock;
-
 static callback_t callback;
 
 static pthread_t sender, receiver, pool;
-static int slaves;
 
-static void send(void* blocks, int size) {
-	int i;
-	for(i=0;i<slaves;i++) {
-		int r=write(sock[i], blocks, size);
+static void bsend(void* blocks, int size) {
+	struct slave* p;
+	for(p=slaves; p!=NULL; p=p->next) {
+		int r=write(p->sock, blocks, size);
 		assert(r>0);
 	}
 }
@@ -74,7 +81,7 @@ static void* sender_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-		send(buffer+st, size*sizeof(uint64_t));
+		bsend(buffer+st, size*sizeof(uint64_t));
 
 		usleep(1000);
 
@@ -85,33 +92,38 @@ static void* sender_thread(void* p) {
 	}
 }
 
-static int receive(int id) {
+static int receive(struct slave* p) {
 	int result, r=0;
-	r=read(sock[id], &result, sizeof(result));
+	r=read(p->sock, &result, sizeof(result));
 	assert(r>0);
 	return result;
 }
 
-static void* receiver_thread(void* p) {
-	int id=(int)p;
+static void* receiver_thread(void* param) {
+	struct slave* me=(struct slave*)param, *p;
+
+	me->sock=socket(PF_INET, SOCK_STREAM, 0);
+	if (connect(me->sock, (struct sockaddr*) me->addr, sizeof(struct sockaddr_in))<0) {
+		perror("connect slave");
+		exit(1);
+	}
 
 	while(1) {
 		int i;
 		int size=max;
-		int v=receive(id);
+		int v=receive(me);
 
 		pthread_mutex_lock(&mux);
 
-		sizes[id]+=v;
+		me->size += v;
 
-		for(i=0;i<slaves;i++) {
-			if (sizes[i]<size)
-				size=sizes[i];
-		}
+		for(p=slaves; p!=NULL; p=p->next)
+			if (p->size<size)
+				size=p->size;
 
 		if (size>0) {
-			for(i=0;i<slaves;i++)
-				sizes[i]-=size;
+			for(p=slaves; p!=NULL; p=p->next)
+				p->size-=size;
 
 			rn+=size;
 
@@ -155,7 +167,7 @@ static void* pool_thread(void* p) {
 	}
 }
 
-void master_stab(int s[], int nslaves, int sz, callback_t cb) {
+void master_stab(int sz, callback_t cb, int npool) {
 	int i;
 
 	max=sz;
@@ -164,43 +176,33 @@ void master_stab(int s[], int nslaves, int sz, callback_t cb) {
 
 	callback=cb;
 
-	slaves=nslaves;
-	sock=s;
-
-	sizes=(int*)calloc(nslaves, sizeof(int));
-
 	pthread_mutex_init(&mux, NULL);
 	pthread_cond_init(&notempty, NULL);
 	pthread_cond_init(&ready, NULL);
 	pthread_cond_init(&sync1, NULL);
-}
-
-void master_start(int npool) {
-	int i;
 
 	pthread_create(&sender, NULL, sender_thread, NULL);
-	for(i=0;i<slaves;i++)
-		pthread_create(&receiver, NULL, receiver_thread, (void*)i);
 	for(i=0;i<npool;i++)
 		pthread_create(&pool, NULL, pool_thread, NULL);
 
 	started = 1;
 }
 
-void add_slave(int fd) {
+void add_slave(struct sockaddr_in* addr) {
+	struct slave* p;
+
 	pthread_mutex_lock(&mux);
 
 	assert(rn == 0 && sn == 0 && fn == 0);
 
-	slaves++;
+	p = (struct slave*) malloc(sizeof(struct slave));
+	p->sock = -1;
+	p->size = 0;
+	p->addr = addr;
+	p->next = slaves;
+	slaves = p;
 
-	sock = (int*) realloc(sock, sizeof(int)*slaves);
-	sock[slaves-1] = fd;
-
-	sizes = (int*) realloc(sizes, sizeof(int)*slaves);
-	sizes[slaves-1] = 0;
-
-	pthread_create(&receiver, NULL, receiver_thread, (void*)(slaves-1));
+	pthread_create(&receiver, NULL, receiver_thread, p);
 
 	pthread_mutex_unlock(&mux);
 }

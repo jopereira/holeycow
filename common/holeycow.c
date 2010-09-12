@@ -259,24 +259,11 @@ struct device_ops init_device_ops = {
  */
 
 static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slave) {
-	int i, *fd;
-	struct sockaddr_in master;
+	int i;
 
-	fd=(int*)calloc(nslaves, sizeof(int));
-
-	for(i=0;i<nslaves;i++) {
-		fd[i]=socket(PF_INET, SOCK_STREAM, 0);
-
-		if (connect(fd[i], (struct sockaddr*) slave+i, sizeof(struct sockaddr_in))<0) {
-			perror("connect slave");
-			exit(1);
-		}
-	}
-
-	fprintf(D(dev)->ctrl, "copying\n");
-	fflush(D(dev)->ctrl);
-		
-	master_stab(fd, nslaves, STAB_QUEUE, master_cb);
+	master_stab(STAB_QUEUE, master_cb, 5);
+	for(i=0;i<nslaves;i++)
+		add_slave(slave+i);
 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 
@@ -287,8 +274,6 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 
 	pthread_cond_broadcast(&D(dev)->init);
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
-
-	master_start(5);
 }
 
 static int master_add_slave(struct device* dev, struct sockaddr_in* slave) {
@@ -302,18 +287,11 @@ static int master_add_slave(struct device* dev, struct sockaddr_in* slave) {
 		pthread_cond_wait(&D(dev)->blocked, &D(dev)->mutex_cow);
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
-	// Reconfigure
-	fd=socket(PF_INET, SOCK_STREAM, 0);
-	if (connect(fd, (struct sockaddr*) slave, sizeof(struct sockaddr_in))<0) {
-		perror("connect slave");
-		exit(1);
-	}
-
-	add_slave(fd);
-	memset(D(dev)->bitmap, 0, (D(dev)->max_size/BLKSIZE)/8+sizeof(int));
-
-	fprintf(D(dev)->ctrl, "copying\n");
+	fprintf(D(dev)->ctrl, "acknowledge %s %d\n", inet_ntoa(slave->sin_addr), ntohs(slave->sin_port));
 	fflush(D(dev)->ctrl);
+
+	add_slave(slave);
+	memset(D(dev)->bitmap, 0, (D(dev)->max_size/BLKSIZE)/8+sizeof(int));
 
 	// Restart writes
   	pthread_mutex_lock(&D(dev)->mutex_cow);
@@ -334,7 +312,7 @@ static void pre_init(struct device* dev) {
 	memset(&slave, 0, len);
 	getsockname(D(dev)->sfd, (struct sockaddr *)&slave, &len);
 
-	fprintf(D(dev)->ctrl, "ok %s %d\n", inet_ntoa(slave.sin_addr), ntohs(slave.sin_port));
+	fprintf(D(dev)->ctrl, "booted %s %d\n", inet_ntoa(slave.sin_addr), ntohs(slave.sin_port));
 	fflush(D(dev)->ctrl);
 }
 
@@ -382,12 +360,13 @@ static void* ctrl_thread(void* arg) {
 			master_init(dev, j, slave);
 		} else if (!strcmp(cmd[0], "makecopier"))
 			slave_init(dev);
-		else if (!strcmp(cmd[0], "recovered")) {
+		else if (!strcmp(cmd[0], "booted")) {
 			memset(slave, 0, sizeof(struct sockaddr_in));
 			slave[0].sin_family = AF_INET;
 			slave[0].sin_port = htons(atoi(cmd[2]));
 			inet_aton(cmd[1], &slave[0].sin_addr);
 			master_add_slave(dev, slave);
+		} else if (!strcmp(cmd[0], "failed")) {
 		}
 
 	}
