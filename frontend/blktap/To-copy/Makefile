@@ -13,7 +13,8 @@ CFLAGS   += $(CFLAGS_libxenstore)
 CFLAGS   += -I $(LIBAIO_DIR)
 CFLAGS   += -D_GNU_SOURCE
 #changed here
-CFLAGS   += -lpthread
+CFLAGS   += -IHoleyproj/common -IHoleyproj/backend/posix -I$(XEN_ROOT)/tools/blktap/drivers
+#-L../../common -lholeycow -lpthread
 
 # Get gcc to generate the dependencies for us.
 CFLAGS   += -Wp,-MD,.$(@F).d
@@ -27,12 +28,14 @@ CRYPT_LIB := -lcrypto
 $(warning *** libgcrypt not installed: falling back to libcrypto ***)
 endif
 
-LDFLAGS_blktapctrl := $(LDFLAGS_libxenctrl) $(LDFLAGS_libxenstore) -L../lib -lblktap
-LDFLAGS_img := $(LIBAIO_DIR)/libaio.a $(CRYPT_LIB) -lpthread -lz
+LDFLAGS_blktapctrl := $(LDFLAGS_libxenctrl) $(LDFLAGS_libxenstore) -L../lib -lblktap -LHoleyproj/common -lholeycow
+LDFLAGS_img := $(LIBAIO_DIR)/libaio.a $(CRYPT_LIB) -lpthread -lz -LHoleyproj/common -lholeycow
 
 BLK-OBJS-y  := block-aio.o
 # changed here
-BLK-OBJS-y  += block-holey.o
+BLK-OBJS-y  += Holeyproj/backend/posix/posixbe.o
+#BLK-OBJS-y  += Holeyproj/common/libholeycow.a
+BLK-OBJS-y  += Holeyproj/frontend/blktap/block-holey.o
 BLK-OBJS-y  += block-sync.o
 BLK-OBJS-y  += block-vmdk.o
 BLK-OBJS-y  += block-ram.o
@@ -40,8 +43,7 @@ BLK-OBJS-y  += block-qcow.o
 BLK-OBJS-y  += block-qcow2.o
 BLK-OBJS-y  += aes.o
 BLK-OBJS-y  += tapaio.o
-BLK-OBJS-y  += holeyaio.o
-BLK-OBJS-y  += slave_stab.o master_stab.o mytime.o
+BLK-OBJS-y  += Holeyproj/frontend/blktap/holeyaio.o
 BLK-OBJS-$(CONFIG_Linux) += blk_linux.o
 
 BLKTAB-OBJS-y := blktapctrl.o
@@ -50,6 +52,7 @@ BLKTAB-OBJS-$(CONFIG_Linux) += blktapctrl_linux.o
 all: $(IBIN) qcow-util
 
 blktapctrl: $(BLKTAB-OBJS-y)
+	cd Holeyproj/common; make; cd ../backend/posix; make 
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDFLAGS_blktapctrl)
 
 tapdisk: tapdisk.o $(BLK-OBJS-y)
@@ -60,6 +63,10 @@ qcow-util: img2qcow qcow2raw qcow-create
 
 img2qcow qcow2raw qcow-create: %: %.o $(BLK-OBJS-y)
 	$(CC) $(CFLAGS) -o $* $^ $(LDFLAGS) $(LDFLAGS_img)
+
+#Holeyproj/frontend/blktap/block-holey.o: block-holey.c
+#	cd Holeyproj/common; echo "I'm in some_dir"; make
+#	cd Holeyproj/backend/posix; echo "I'm in some_dir"; make
 
 install: all
 	$(INSTALL_PROG) $(IBIN) $(QCOW_UTIL) $(VHD_UTIL) $(DESTDIR)$(SBINDIR)

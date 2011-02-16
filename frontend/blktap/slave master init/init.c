@@ -32,7 +32,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "slave_master_def.h"
+#include "defs.h"
 
 int make_named_socket (const char *filename)
 {
@@ -75,11 +75,11 @@ int make_named_socket (const char *filename)
 int main(int argc, char* argv[]){
 
      if (argc!=5) {
-		fprintf(stderr, "usage: master id ncopiers stderr_file log_file\n");
+		fprintf(stderr, "usage: master id cowdir stderr_file log_file\n");
 		exit(1);
      }
 
-     char path[40];
+     char path[200];
 
      mkdir(VARPATH,S_IRWXU);
 
@@ -88,16 +88,12 @@ int main(int argc, char* argv[]){
 
      int newsockfd = make_named_socket (path);
 
-
-     int master=1;
-     send(newsockfd,&master,sizeof(int),0);
- 
-     struct master_sts ms;
-     ms.ncopiers=atoi(argv[2]);
+     struct args_sts ms;
+     strcpy(ms.cowdir,argv[2]);
      strcpy(ms.stderr,argv[3]);
      strcpy(ms.log,argv[4]);
 
-     send(newsockfd,&ms,sizeof(struct master_sts),0);
+     send(newsockfd,&ms,sizeof(struct args_sts),0);
 
 
 

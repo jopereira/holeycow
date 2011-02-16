@@ -13,12 +13,12 @@ For ubuntu the Source package is located at: http://packages.ubuntu.com/source/h
 
 Donwload HoleyCOW source.
 
-In Holeysrc/slave_masterdef.h it is defined where file sockets are created, by default is /var/run/holey/.
+In Holeysrc/frontend/blktap/defs.h it is defined where file sockets are created, by default is /var/run/holey/.
 If needed it is possible to change it.
 
-mv Holeysrc/BlktapController.py xen-src/tools/python/xen/xend/server/
+mv Holeysrc/frontend/blktap/To-copy/BlktapController.py xen-src/tools/python/xen/xend/server/
 
-mv Holeysrc/* xen-src/tools/blktap/drivers/ (move all files except BlktapController.py and the content of folders imagestemplates and slave master init)
+mv Holeysrc/frontend/blktap/To-copy/* xen-src/tools/blktap/drivers/ (move all files except BlktapController.py)
 
 Compile Xen kernel.
 
@@ -76,6 +76,20 @@ We created two dummy files, image1 and image2, that will be neeeded by the tap d
 The name of the real partition must not end with a number...
 This detail will be changed in a future version.
 
+
+- Before Running the VMs
+
+Start the controller with:
+
+java Holeycontrollersource/src/org.holeycow.coordinator.Main
+
+
+- Create two COW snapshot files one for each VM
+
+touch cow0-image
+touch cow1-image
+
+
 Finally, we need to run The VMs.
 
 xm create -c vm1conffile.cfg (launch VM 1)
@@ -87,31 +101,19 @@ It is necessary to launch The VMs first and then wait a few seconds before doing
 
 /************************ PAssing arguments *********************************/
 
-mv holeysrc/slave master init/ localfolder/
+cd holeysrc/frontend/blktap/slave master init/
 
-In localfolder/slave_masterdef.h it is defined where file sockets are created, by default is /var/run/holey/.
-If the file with the same name as this one (Holeysrc/slave_masterdef.h) was changed, before the compilation of XEN's kernel, 
-it must be changed here to the same value.
+compile init.c with make.
 
-Compile master.c and slave.c with make.
-
-cd localfolder
-
-./master VM_id_that_will_run_master numer_of_slaves file_where_stderr_is_written(fullpath) file_where_log_is_written(fullpath)
-
-./slave VM_id_that_will_run_slave master_ip_address folder_where_slave_cow_image_is_stored(fullpath) file_where_stderr_is_written(fullpath) file_where_log_is_written(fullpath)
+./init VM_id cow_snapshot_file_for_this_VM(fullpath) file_where_stderr_is_written(fullpath) file_where_log_is_written(fullpath)
 
 As example the values could be:
 
-Master will run in VM with id 1 (this was defined in VM configuration file as told above), 
-there will be 1 slave and the stderr and log are written in /home/holeil/ folder.
+Pass arguments to VM with id 1 (this was defined in VM configuration file as told above), cow snapshot is in /home/ folder (snapshots files were created with touch in this location previously, as described above). Finnaly, stderr and log are written in /home/holeil/ folder.
 
-./master 1 1 /home/holeyl/stderr /home/holeyl/log
+./init 1 /home/image1-cow /home/holey/stderr  /home/holey/log
 
-Slave will run in VM with id 2. MAster is running in localhost 127.0.0.1. The folder where slave's snapshot is kept is /storage/slave-cow/.
-THe logs are kept in /home/holeyl/folder.
-
-./slave 2 127.0.0.1 /storage/slave-cow/ /home/holeyl/stderr /home/holeyl/log
+To the other VM the process is similar we only change the id and files...
 
 
 

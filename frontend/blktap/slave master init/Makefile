@@ -1,4 +1,5 @@
-all: slave.c master.c
-	gcc -Wall slave.c -o slave
-	gcc -Wall master.c -o master
-	
+all: init.c
+	gcc -Wall -g -I../../blktap init.c -o init	
+clean:
+	rm -f *.o
+

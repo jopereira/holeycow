@@ -56,12 +56,19 @@
 #include <sys/un.h>
 #include <sys/types.h>
 
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <assert.h>
+
 #include "tapdisk.h"
 #include "holeyaio.h"
 #include "blk.h"
+#include "defs.h"
+#include "posixbe.h"
+#include <holeycow.h>
 
-#include "holeycow.c"
-#include "slave_master_def.h"
+//#include "slave_master_def.h"
 
 #define MAX_AIO_REQS (MAX_REQUESTS * MAX_SEGMENTS_PER_REQ)
 
@@ -77,10 +84,16 @@ FILE *stream1;
 int firstread;
 
 struct tdholey_state {
-	int fd;
+	//int fd;
 	holey_aio_context_t aio;
+        //struct device storage, snapshot, cow, ba;
+        struct device ba;
+        //uint64_t max_size;
+	//struct sockaddr_in coord;
         char name[200];
-        int master;
+        char storagename[200];
+        char cowname[200];
+        //int master;
 };
 
 
@@ -189,8 +202,11 @@ static int tdholey_open (struct disk_driver *dd, const char *name, td_flag_t fla
         	goto done;
         }
 
-        prv->fd = fd;
+        
+
+        //prv->fd = fd;
         strcpy(prv->name,name);
+        strcpy(prv->storagename,realname);
 
 	init_fds(dd); 
         ret = get_image_info(s, fd);
@@ -207,127 +223,75 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
 	struct   tdholey_state *prv = (struct tdholey_state *)dd->private;
 	int      size    = nb_sectors * s->sector_size;
 	uint64_t offset  = sector * (uint64_t)s->sector_size;
-        int idvm,master, o_flags;
-        char realname[100];
+        //int idvm,master, o_flags;
+        //char realname[100];
         int ret;
        
-        
- 
         if(firstread==0){        
+           char path[200];
+           int fd;
+	  struct device storage, snapshot, cow;
+	  uint64_t max_size;
+	  struct sockaddr_in coord;
+          
+          struct args_sts r;     
 
-          char path[40];
-          int newsockfd;
-          int size = sizeof(int);
-          int bcount= 0;
-          int br= 0;
-
+          int newsockfd,bcount,size,br;
+          
           mkdir(VARPATH,S_IRWXU);
 
           strcpy(path,VARPATH);
           strcat(path,&prv->name[strlen(prv->name)-1]);
 
           newsockfd = make_named_socket (path);
-          
+  
+
+          size = sizeof(r);
+          bcount= 0;
+          br= 0;
           while (bcount < size) {             /* loop until full buffer */
-           if ((br= recv(newsockfd,(&(prv->master))+bcount,size-bcount,0)) > 0) {
-             //printf("no while bcount %d %d %d\n",bcount,br,size-bcount);
-             bcount += br;                /* increment byte counter */
-                                /* move buffer ptr for next read */
-           }
-           else if (br < 0)               /* signal an error to the caller */
-           DPRINTF("ERROR reading from socket");
+             if ((br= recv(newsockfd,(&r)+bcount,size-bcount,0)) > 0) {
+               //printf("no while bcount %d %d %d\n",bcount,br,size-bcount);
+               bcount += br;                /* increment byte counter */
+               /* move buffer ptr for next read */
+          }
+          else if (br < 0)               /* signal an error to the caller */
+            perror("ERROR reading from socket");
           } 
+   
+          strcpy(HLOG,r.log);
+          strcpy(HSTDERR,r.stderr);
+          strcpy(prv->cowname,r.cowdir);
 
-                  
-          //Holey initialization......
-          if(prv->master==1){
+          close(newsockfd);
+          unlink(path);  
 
-            struct master_sts r;       
-            FILE *fp;
+          fd=open(prv->storagename, O_RDWR);
+	  max_size=lseek(fd, 0, SEEK_END);
+	  close(fd);
 
-            size = sizeof(r);
-            bcount= 0;
-            br= 0;
-            while (bcount < size) {             /* loop until full buffer */
-              if ((br= recv(newsockfd,(&r)+bcount,size-bcount,0)) > 0) {
-              //printf("no while bcount %d %d %d\n",bcount,br,size-bcount);
-              bcount += br;                /* increment byte counter */
-                                /* move buffer ptr for next read */
-            }
-            else if (br < 0)               /* signal an error to the caller */
-              perror("ERROR reading from socket");
-            } 
-     
-            fp = fopen(r.log,"a");
-            fprintf(fp,"r.master %d\nr.ncopiers %d\nr.log %s\nr.stderr %s\n",prv->master,r.ncopiers,r.log,r.stderr);
-            fclose(fp); 
-            
-            strcpy(HLOG,r.log);
-            strcpy(HSTDERR,r.stderr);
+	  fd=socket(PF_INET, SOCK_STREAM, 0);
 
-            holey_init(HOLEY_SERVER_STATUS_MASTER, NULL, r.ncopiers, NULL);
+	  memset(&coord, 0, sizeof(struct sockaddr_in));
+	  coord.sin_family = AF_INET;
+	  coord.sin_port = htons(12345);
+	  inet_aton("127.0.0.1", &coord.sin_addr);
+
+	  if (connect(fd, (struct sockaddr*) &coord, sizeof(struct sockaddr_in))<0) {
+		perror("connect coordination");
+		exit(1); 
           }
-          else{
-
-            struct slave_sts r;       
-            FILE* fp;
-
-            size = sizeof(r);
-            bcount= 0;
-            br= 0;
-            while (bcount < size) {             /* loop until full buffer */
-              if ((br= recv(newsockfd,(&r)+bcount,size-bcount,0)) > 0) {
-                //printf("no while bcount %d %d %d\n",bcount,br,size-bcount);
-                bcount += br;                /* increment byte counter */
-                                /* move buffer ptr for next read */
-            }
-            else if (br < 0)               /* signal an error to the caller */
-              perror("ERROR reading from socket");
-            } 
-
-            fp = fopen(r.log,"a");
-            fprintf(fp,"r.master %d\nr.masteradd %s\nr.cowdir %s\nr.log %s\nr.stderr %s\n",prv->master,r.masteradd,r.cowdir,r.log,r.stderr);
-            fclose(fp);
-            
-            strcpy(HLOG,r.log);
-            strcpy(HSTDERR,r.stderr);
-
-
-            holey_init(HOLEY_SERVER_STATUS_SLAVE, r.masteradd, 1000, r.cowdir);
-          }
-
-           close(newsockfd);
-           unlink(path);  
-
-          strcpy(realname,prv->name);
-          realname[strlen(realname)-1]='\0';
-
-
-	  /* Open the file */
-	  o_flags = O_DIRECT | O_LARGEFILE | O_RDWR | O_SYNC;
-          prv->fd = holey_open(realname, o_flags);
-
-          if ( (prv->fd == -1) && (errno == EINVAL) ) {
-
-                /* Maybe O_DIRECT isn't supported. */
-		o_flags &= ~O_DIRECT;
-                prv->fd = holey_open(realname, o_flags);
-                if (prv->fd != -1) DPRINTF("WARNING: Accessing image without"
-                                     "O_DIRECT! (%s)\n", realname);
-
-          } else if (prv->fd != -1) DPRINTF("open(%s) with O_DIRECT\n", realname);
 	
-          if (prv->fd == -1) {
-		DPRINTF("Unable to open [%s] (%d)!\n", realname, 0 - errno);
-          }
-          
-          holey_start(1);
+          posixbe_open(&storage, prv->storagename, O_RDWR);
+          posixbe_open(&snapshot, prv->cowname, O_RDWR);
+          holey_open(&cow, &storage, &snapshot, max_size, fd);
+          blockalign(&(prv->ba), &cow);
+
 
           firstread=1;
         }
         
-
-        ret = holey_pread(prv->fd,buf,size,offset);
+        ret = device_pread_sync(&(prv->ba), buf, size, offset);
         if (ret != size) {
 			ret = 0 - errno;
 	} else {
@@ -350,7 +314,7 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
 	uint64_t offset  = sector * (uint64_t)s->sector_size;
         int ret;     
        
-        ret = holey_pwrite(prv->fd,buf,size,offset);
+        ret = device_pwrite_sync(&(prv->ba), buf, size, offset);
         if (ret != size) {
 			ret = 0 - errno;
 	} else {
@@ -375,7 +339,7 @@ static int tdholey_close(struct disk_driver *dd)
 	struct tdholey_state *prv = (struct tdholey_state *)dd->private;
 	
 	io_destroy(prv->aio.aio_ctx.aio_ctx);
-	holey_close(prv->fd);
+	//holey_close(prv->fd);
 
 	return 0;
 }
