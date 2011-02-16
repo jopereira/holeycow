@@ -42,8 +42,14 @@ int main(int argc, char* argv[]) {
 		exit(1);
 	}
 
-	fd=open(argv[1], O_RDWR);
-	workload_init(fd);
+	fd=open(argv[1], O_RDWR|O_CREAT|O_EXCL, 0644);
+	if (fd>0) {
+		workload_init(fd);
+		printf("Initialized.\n");
+	} else {
+		fd=open(argv[1], O_RDWR);
+		printf("Opened.\n");
+	}
 	max_size=lseek(fd, 0, SEEK_END);
 	close(fd);
 
@@ -60,7 +66,7 @@ int main(int argc, char* argv[]) {
 	}
 	
 	posixbe_open(&storage, argv[1], O_RDWR);
-	posixbe_open(&snapshot, argv[2], O_RDWR);
+	posixbe_open(&snapshot, argv[2], O_RDWR|O_CREAT);
 	holey_open(&cow, &storage, &snapshot, max_size, fd);
 	blockalign(&ba, &cow);
 
