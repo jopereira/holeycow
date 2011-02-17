@@ -317,14 +317,7 @@ static void pre_init(struct device* dev) {
 }
 
 static void slave_init(struct device* dev) {
-	int fd, len;
-	struct sockaddr_in master;
-
-	len=sizeof(master);
-	memset(&master, 0, sizeof(master));
-
-	fd = accept(D(dev)->sfd, (struct sockaddr*)&master, (socklen_t*)&len);
-	slave_stab(fd, STAB_QUEUE, 5, slave_cb, dev);
+	slave_stab(D(dev)->sfd, STAB_QUEUE, 5, slave_cb, dev);
 
 	pthread_mutex_lock(&D(dev)->mutex_cow);
 	dev->ops = &slave_device_ops;

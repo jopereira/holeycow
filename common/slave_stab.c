@@ -22,7 +22,12 @@
 #include <pthread.h>
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "stability.h"
 #include "holeycow.h"
@@ -37,51 +42,12 @@ static int rt, rn;		/* receiver tail and size */
 static pthread_mutex_t mux;
 static pthread_cond_t notempty, ready;
 
-static int sock;
+static int sfd, sock;
 
 static callback_t callback;
 static void* cookie;
 
 static pthread_t sender, receiver, pool;
-
-static int receive(void* buffer, int size) {
-	return read(sock, buffer, size);
-}
-
-static void* receiver_thread(void* p) {
-	pthread_mutex_lock(&mux);
-
-	while(1) {
-
-		int size=max-sn;
-		if (h+size>max)
-			size=max-h;
-
-		assert(size>0);
-
-		pthread_mutex_unlock(&mux);
-
-		size=receive(buffer+h, size*sizeof(block_t));
-	
-		if(size == 0) {		/* closed socket */
-			/* TODO: flush? return error? what? */
-			fprintf(stderr, " *** Bailing out! Master closed socket! *** \n");
-			exit(0);
-		}
-	
-		assert(size>0 && !(size%sizeof(block_t)));
-		
-		size/=sizeof(block_t);
-		h=(h+size)%max;
-
-		pthread_mutex_lock(&mux);
-
-		sn+=size;
-		rn+=size;
-
-		pthread_cond_broadcast(&notempty);
-	}
-}
 
 static void* pool_thread(void* p) {
 	pthread_mutex_lock(&mux);
@@ -130,6 +96,57 @@ static void* sender_thread(void* p) {
 	}
 }
 
+static void receiver_thread_loop() {
+	pthread_mutex_lock(&mux);
+
+	while(1) {
+
+		int size=max-sn;
+		if (h+size>max)
+			size=max-h;
+
+		assert(size>0);
+
+		pthread_mutex_unlock(&mux);
+
+		size=read(sock, buffer+h, size*sizeof(block_t));
+	
+		if(size <= 0 || (size%sizeof(block_t)))
+			return;
+	
+		size/=sizeof(block_t);
+		h=(h+size)%max;
+
+		pthread_mutex_lock(&mux);
+
+		sn+=size;
+		rn+=size;
+
+		pthread_cond_broadcast(&notempty);
+	}
+}
+
+static void* receiver_thread(void* p) {
+	int len;
+	struct sockaddr_in master;
+
+	while(1) {
+		len=sizeof(master);
+		memset(&master, 0, sizeof(master));
+
+		sock = accept(sfd, (struct sockaddr*)&master, (socklen_t*)&len);
+
+		pthread_create(&sender, NULL, sender_thread, NULL);
+
+		receiver_thread_loop();
+
+		close(sock);
+		sock=-1;
+
+		pthread_join(sender, NULL);
+	}
+}
+
 int slave_stab(int s, int sz, int npool, callback_t cb, void* c) {
 	int i;
 
@@ -139,15 +156,13 @@ int slave_stab(int s, int sz, int npool, callback_t cb, void* c) {
 	callback=cb;
 	cookie=c;
 
-	sock=s;
+	sfd=s;
 
 	pthread_mutex_init(&mux, NULL);
 	pthread_cond_init(&notempty, NULL);
 	pthread_cond_init(&ready, NULL);
 
-	pthread_create(&sender, NULL, sender_thread, NULL);
 	pthread_create(&receiver, NULL, receiver_thread, NULL);
 	for(i=0;i<npool;i++)
 		pthread_create(&pool, NULL, pool_thread, NULL);
 }
-
