@@ -30,6 +30,7 @@ typedef void (*callback_t)(block_t, void*);
 /* master aka designated writer */
 void master_stab(int s, callback_t, int npool);
 void add_slave(struct sockaddr_in*);
+void del_slave(struct sockaddr_in*);
 int add_block(block_t id, void*);
 void wait_sync(int dump);
 

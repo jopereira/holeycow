@@ -297,6 +297,7 @@ static int master_add_slave(struct device* dev, struct sockaddr_in* slave) {
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	D(dev)->ready = 1;
 	dev->ops = &master_device_ops;
+	pthread_cond_broadcast(&D(dev)->init);
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
 }
 
@@ -358,8 +359,12 @@ static void* ctrl_thread(void* arg) {
 			inet_aton(cmd[1], &slave[0].sin_addr);
 			master_add_slave(dev, slave);
 		} else if (!strcmp(cmd[0], "failed")) {
+			memset(slave, 0, sizeof(struct sockaddr_in));
+			slave[0].sin_family = AF_INET;
+			slave[0].sin_port = htons(atoi(cmd[2]));
+			inet_aton(cmd[1], &slave[0].sin_addr);
+			del_slave(slave);
 		}
-
 	}
 
 	// DANGER! Lost connection to controller.

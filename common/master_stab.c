@@ -40,9 +40,11 @@ static int rt, rn;		/* receiver tail and size */
 static int ft, fn;		/* fsync tail and size */
 
 static struct slave {
+	int dead;
 	int ssize, rsize;	/* tokens to/from slaves */
 	int sock;
 	struct sockaddr_in* addr;
+	pthread_t sender;
 	struct slave* next;
 } *slaves;
 
@@ -55,7 +57,7 @@ static pthread_cond_t notempty, ready, sync1;
 
 static callback_t callback;
 
-static pthread_t sender, pool;
+static pthread_t pool;
 
 static void* receiver_thread(void* param) {
 	struct slave* me=(struct slave*)param, *p;
@@ -94,17 +96,40 @@ static void* receiver_thread(void* param) {
 	}
 }
 
-static void sender_thread_loop(struct slave* me) {
+static void gc_slaves() {
 	struct slave *p;
+	int size;
 
+	if (slaves==NULL)
+		return;
+
+	size=max;
+	for(p=slaves; p!=NULL; p=p->next)
+		if (p->ssize<size)
+			size=p->ssize;
+
+	if (size>0) {
+		for(p=slaves; p!=NULL; p=p->next)
+			p->ssize-=size;
+
+		st=(st+size)%max;
+		sn-=size;
+
+		assert(sn>=0);
+	}
+
+}
+
+static void sender_thread_loop(struct slave* me) {
 	pthread_mutex_lock(&mux);
 
 	while(1) {
 
 		int size, v, est;
 
-		while(sn-me->ssize==0)
+		while(sn-me->ssize==0 && me->sock!=-1) {
 			pthread_cond_wait(&notempty, &mux);
+		}
 
 		est=(st+me->ssize)%max;
                 
@@ -127,20 +152,9 @@ static void sender_thread_loop(struct slave* me) {
 
 		pthread_mutex_lock(&mux);
 
-		size=max;
 		me->ssize += v/sizeof(uint64_t);
 
-		for(p=slaves; p!=NULL; p=p->next)
-			if (p->ssize<size)
-				size=p->ssize;
-
-		if (size>0) {
-			for(p=slaves; p!=NULL; p=p->next)
-				p->ssize-=size;
-
-			st=(st+size)%max;
-			sn-=size;
-		}
+		gc_slaves();
 	}
 }
 
@@ -148,7 +162,7 @@ static void* sender_thread(void* param) {
 	struct slave* me=(struct slave*)param;
 	static pthread_t receiver;
 
-	while(1) {
+	while(!me->dead) {
 		me->sock=socket(PF_INET, SOCK_STREAM, 0);
 		if (connect(me->sock, (struct sockaddr*) me->addr, sizeof(struct sockaddr_in))<0) {
 			sleep(1);
@@ -224,15 +238,44 @@ void add_slave(struct sockaddr_in* addr) {
 	assert(rn == 0 && sn == 0 && fn == 0);
 
 	p = (struct slave*) malloc(sizeof(struct slave));
+	memset(p, 0, sizeof(*p));
 	p->sock = -1;
 	p->rsize = 0;
 	p->addr = addr;
 	p->next = slaves;
 	slaves = p;
 
-	pthread_create(&sender, NULL, sender_thread, p);
+	pthread_create(&p->sender, NULL, sender_thread, p);
 
 	pthread_mutex_unlock(&mux);
+}
+
+void del_slave(struct sockaddr_in* addr) {
+	struct slave** p, *d;
+
+	pthread_mutex_lock(&mux);
+
+	for(p=&slaves;*p!=NULL;p=&(*p)->next)
+		if ((*p)->addr->sin_addr.s_addr == addr->sin_addr.s_addr)
+			break;
+
+	assert(*p!=NULL);
+
+	d=*p;
+	*p=d->next;
+
+	close(d->sock);
+	d->sock=-1;
+	d->dead=1;
+	d->next=NULL;
+
+	pthread_cond_broadcast(&notempty);
+	gc_slaves();
+
+	pthread_mutex_unlock(&mux);
+
+	pthread_join(d->sender, NULL);
+	free(d);
 }
 
 int add_block(block_t id, void* cookie) {
