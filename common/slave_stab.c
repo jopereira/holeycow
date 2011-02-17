@@ -22,10 +22,10 @@
 #include <pthread.h>
 #include <assert.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include "stability.h"
 #include "holeycow.h"
-#include <unistd.h>
 
 /* Circular buffer with 2 tails. Invariant: sn <= rn */
 //changed here block_t now is uint64_t

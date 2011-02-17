@@ -18,10 +18,11 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#include <stdint.h>
-
 #ifndef __STAB__
 #define __STAB__
+
+#include <stdint.h>
+#include <sys/socket.h>
 
 typedef uint64_t block_t;
 typedef void (*callback_t)(block_t, void*);

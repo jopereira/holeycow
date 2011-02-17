@@ -26,10 +26,10 @@
 #include <pthread.h>
 #include <assert.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include "holeycow.h"
 #include "stability.h"
-#include <unistd.h>
 
 /* Circular buffer with 2 tails. Invariant: sn <= rn */
 static block_t* buffer;
