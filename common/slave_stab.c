@@ -107,10 +107,6 @@ static void* pool_thread(void* p) {
 	}
 }
 
-static void send(int size) {
-	write(sock, &size, sizeof(size));
-}
-
 static void* sender_thread(void* p) {
 	while(1) {
 		int size;
@@ -128,13 +124,13 @@ static void* sender_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-		send(size);
+		write(sock, &size, sizeof(size));
 
 		usleep(1000);
 	}
 }
 
-int slave_stab(int s, int sz, callback_t cb, void* c) {
+int slave_stab(int s, int sz, int npool, callback_t cb, void* c) {
 	int i;
 
 	max=sz;
@@ -148,12 +144,6 @@ int slave_stab(int s, int sz, callback_t cb, void* c) {
 	pthread_mutex_init(&mux, NULL);
 	pthread_cond_init(&notempty, NULL);
 	pthread_cond_init(&ready, NULL);
-
-	return 0;
-}
-
-void slave_start(int npool) {
-	int i;
 
 	pthread_create(&sender, NULL, sender_thread, NULL);
 	pthread_create(&receiver, NULL, receiver_thread, NULL);

@@ -22,7 +22,7 @@
 #define __STAB__
 
 #include <stdint.h>
-#include <sys/socket.h>
+#include <sys/types.h>
 
 typedef uint64_t block_t;
 typedef void (*callback_t)(block_t, void*);
@@ -33,8 +33,7 @@ void add_slave(struct sockaddr_in*);
 int add_block(block_t id, void*);
 void wait_sync(int dump);
 
-/* slave aka replica */
-int slave_stab(int sock, int s, callback_t cb, void* cookie);
-void slave_start(int npool);
+/* slave aka copier */
+int slave_stab(int sock, int s, int npool, callback_t cb, void* cookie);
 
 #endif

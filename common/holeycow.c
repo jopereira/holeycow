@@ -324,16 +324,14 @@ static void slave_init(struct device* dev) {
 	memset(&master, 0, sizeof(master));
 
 	fd = accept(D(dev)->sfd, (struct sockaddr*)&master, (socklen_t*)&len);
-	slave_stab(fd, STAB_QUEUE, slave_cb, dev);
+	slave_stab(fd, STAB_QUEUE, 5, slave_cb, dev);
 
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	pthread_mutex_lock(&D(dev)->mutex_cow);
 	dev->ops = &slave_device_ops;
 	D(dev)->ready = 1;
 
 	pthread_cond_broadcast(&D(dev)->init);
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
-
-	slave_start(5);
 }
 
 static void* ctrl_thread(void* arg) {
