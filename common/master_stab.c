@@ -55,16 +55,47 @@ static pthread_cond_t notempty, ready, sync1;
 
 static callback_t callback;
 
-static pthread_t sender, receiver, pool;
+static pthread_t sender, pool;
 
-static int bsend(struct slave* p, void* blocks, int size) {
-	int r=write(p->sock, blocks, size);
-	assert(r==size && !(r%sizeof(uint64_t)));
-	return r;
+static void* receiver_thread(void* param) {
+	struct slave* me=(struct slave*)param, *p;
+
+	while(1) {
+		int i;
+		int size=max;
+		int v;
+
+		if (read(me->sock, &v, sizeof(v))!=sizeof(v)) {
+			pthread_mutex_lock(&mux);
+			close(me->sock);
+			me->sock=-1;
+			pthread_mutex_unlock(&mux);
+			return NULL;
+		}
+
+		pthread_mutex_lock(&mux);
+
+		me->rsize += v;
+
+		for(p=slaves; p!=NULL; p=p->next)
+			if (p->rsize<size)
+				size=p->rsize;
+
+		if (size>0) {
+			for(p=slaves; p!=NULL; p=p->next)
+				p->rsize-=size;
+
+			rn+=size;
+
+			pthread_cond_broadcast(&ready);
+		}
+
+		pthread_mutex_unlock(&mux);
+	}
 }
 
-static void* sender_thread(void* param) {
-	struct slave* me=(struct slave*)param, *p;
+static void sender_thread_loop(struct slave* me) {
+	struct slave *p;
 
 	pthread_mutex_lock(&mux);
 
@@ -83,7 +114,14 @@ static void* sender_thread(void* param) {
 
 		pthread_mutex_unlock(&mux);
 
-		v=bsend(me, buffer+est, size*sizeof(uint64_t));
+		v=write(me->sock, buffer+est, size*sizeof(uint64_t));
+		if (v<=0 || (v%sizeof(uint64_t))) {
+			pthread_mutex_lock(&mux);
+			close(me->sock);
+			me->sock=-1;
+			pthread_mutex_unlock(&mux);
+			return;
+		}
 
 		usleep(1000);
 
@@ -106,45 +144,22 @@ static void* sender_thread(void* param) {
 	}
 }
 
-static int receive(struct slave* p) {
-	int result, r=0;
-	r=read(p->sock, &result, sizeof(result));
-	assert(r>0);
-	return result;
-}
-
-static void* receiver_thread(void* param) {
-	struct slave* me=(struct slave*)param, *p;
-
-	me->sock=socket(PF_INET, SOCK_STREAM, 0);
-	if (connect(me->sock, (struct sockaddr*) me->addr, sizeof(struct sockaddr_in))<0) {
-		perror("connect slave");
-		exit(1);
-	}
+static void* sender_thread(void* param) {
+	struct slave* me=(struct slave*)param;
+	static pthread_t receiver;
 
 	while(1) {
-		int i;
-		int size=max;
-		int v=receive(me);
-
-		pthread_mutex_lock(&mux);
-
-		me->rsize += v;
-
-		for(p=slaves; p!=NULL; p=p->next)
-			if (p->rsize<size)
-				size=p->rsize;
-
-		if (size>0) {
-			for(p=slaves; p!=NULL; p=p->next)
-				p->rsize-=size;
-
-			rn+=size;
-
-			pthread_cond_broadcast(&ready);
+		me->sock=socket(PF_INET, SOCK_STREAM, 0);
+		if (connect(me->sock, (struct sockaddr*) me->addr, sizeof(struct sockaddr_in))<0) {
+			sleep(1);
+			continue;
 		}
 
-		pthread_mutex_unlock(&mux);
+		pthread_create(&receiver, NULL, receiver_thread, me);
+
+		sender_thread_loop(me);
+
+		pthread_join(receiver, NULL);
 	}
 }
 
@@ -216,7 +231,6 @@ void add_slave(struct sockaddr_in* addr) {
 	slaves = p;
 
 	pthread_create(&sender, NULL, sender_thread, p);
-	pthread_create(&receiver, NULL, receiver_thread, p);
 
 	pthread_mutex_unlock(&mux);
 }

@@ -90,7 +90,13 @@ static void* sender_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-		write(sock, &size, sizeof(size));
+		if (write(sock, &size, sizeof(size))!=sizeof(size)) {
+			pthread_mutex_lock(&mux);
+			close(sock);
+			sock=-1;
+			pthread_mutex_unlock(&mux);
+			return NULL;
+		}
 
 		usleep(1000);
 	}
@@ -111,8 +117,13 @@ static void receiver_thread_loop() {
 
 		size=read(sock, buffer+h, size*sizeof(block_t));
 	
-		if(size <= 0 || (size%sizeof(block_t)))
+		if(size <= 0 || (size%sizeof(block_t))) {
+			pthread_mutex_lock(&mux);
+			close(sock);
+			sock=-1;
+			pthread_mutex_unlock(&mux);
 			return;
+		}
 	
 		size/=sizeof(block_t);
 		h=(h+size)%max;
@@ -139,9 +150,6 @@ static void* receiver_thread(void* p) {
 		pthread_create(&sender, NULL, sender_thread, NULL);
 
 		receiver_thread_loop();
-
-		close(sock);
-		sock=-1;
 
 		pthread_join(sender, NULL);
 	}
