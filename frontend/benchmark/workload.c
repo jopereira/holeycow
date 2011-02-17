@@ -37,7 +37,7 @@ void* workload_thread(void* p) {
 	char bogus[BLKSIZE];
 	int i,j;
 
-	for(i=0;i<100;i++) {
+	for(i=0;;i++) {
 		for(j=0;j<10;j++) {
 			int id=(random()%MAXBLK)|(random()%MAXBLK);
 			device_pread_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
@@ -48,7 +48,7 @@ void* workload_thread(void* p) {
 			device_pwrite_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
 			usleep(10000);
 		}
-		printf(".");
+		printf("\r%d pages",i*10);
 		fflush(stdout);
 	}
 }
