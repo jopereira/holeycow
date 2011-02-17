@@ -40,7 +40,7 @@ static int rt, rn;		/* receiver tail and size */
 static int ft, fn;		/* fsync tail and size */
 
 static struct slave {
-	int size;			/* tokens from slaves */
+	int ssize, rsize;	/* tokens to/from slaves */
 	int sock;
 	struct sockaddr_in* addr;
 	struct slave* next;
@@ -57,38 +57,52 @@ static callback_t callback;
 
 static pthread_t sender, receiver, pool;
 
-static void bsend(void* blocks, int size) {
-	struct slave* p;
-	for(p=slaves; p!=NULL; p=p->next) {
-		int r=write(p->sock, blocks, size);
-		assert(r>0);
-	}
+static int bsend(struct slave* p, void* blocks, int size) {
+	int r=write(p->sock, blocks, size);
+	assert(r==size && !(r%sizeof(uint64_t)));
+	return r;
 }
 
-static void* sender_thread(void* p) {
+static void* sender_thread(void* param) {
+	struct slave* me=(struct slave*)param, *p;
 
 	pthread_mutex_lock(&mux);
 
 	while(1) {
 
-		int size;
-		while(sn==0)
+		int size, v, est;
+
+		while(sn-me->ssize==0)
 			pthread_cond_wait(&notempty, &mux);
+
+		est=(st+me->ssize)%max;
                 
-		size=sn>500?500:sn;
-		if (st+size>max)
-			size=max-st;
+		size=sn>500?500:sn-me->ssize;
+		if (est+size>max)
+			size=max-est;
 
 		pthread_mutex_unlock(&mux);
 
-		bsend(buffer+st, size*sizeof(uint64_t));
+		v=bsend(me, buffer+est, size*sizeof(uint64_t));
 
 		usleep(1000);
 
 		pthread_mutex_lock(&mux);
 
-		st=(st+size)%max;
-		sn-=size;
+		size=max;
+		me->ssize += v/sizeof(uint64_t);
+
+		for(p=slaves; p!=NULL; p=p->next)
+			if (p->ssize<size)
+				size=p->ssize;
+
+		if (size>0) {
+			for(p=slaves; p!=NULL; p=p->next)
+				p->ssize-=size;
+
+			st=(st+size)%max;
+			sn-=size;
+		}
 	}
 }
 
@@ -115,15 +129,15 @@ static void* receiver_thread(void* param) {
 
 		pthread_mutex_lock(&mux);
 
-		me->size += v;
+		me->rsize += v;
 
 		for(p=slaves; p!=NULL; p=p->next)
-			if (p->size<size)
-				size=p->size;
+			if (p->rsize<size)
+				size=p->rsize;
 
 		if (size>0) {
 			for(p=slaves; p!=NULL; p=p->next)
-				p->size-=size;
+				p->rsize-=size;
 
 			rn+=size;
 
@@ -181,7 +195,6 @@ void master_stab(int sz, callback_t cb, int npool) {
 	pthread_cond_init(&ready, NULL);
 	pthread_cond_init(&sync1, NULL);
 
-	pthread_create(&sender, NULL, sender_thread, NULL);
 	for(i=0;i<npool;i++)
 		pthread_create(&pool, NULL, pool_thread, NULL);
 
@@ -197,11 +210,12 @@ void add_slave(struct sockaddr_in* addr) {
 
 	p = (struct slave*) malloc(sizeof(struct slave));
 	p->sock = -1;
-	p->size = 0;
+	p->rsize = 0;
 	p->addr = addr;
 	p->next = slaves;
 	slaves = p;
 
+	pthread_create(&sender, NULL, sender_thread, p);
 	pthread_create(&receiver, NULL, receiver_thread, p);
 
 	pthread_mutex_unlock(&mux);
@@ -223,9 +237,14 @@ int add_block(block_t id, void* cookie) {
 
 	result=eh-et;
 
-	pthread_cond_signal(&notempty);
+	pthread_cond_broadcast(&notempty);
 
 	if (slaves==0) {
+		/* Fake send */
+		sn--;
+		st=(st+1)%max;
+
+		/* Fake receive */
 		rn++;
 		pthread_cond_signal(&ready);
 	}
