@@ -142,6 +142,10 @@ static int get_image_info(struct td_state *s, int fd)
 	}
 	s->info = 0;
 
+        //TODO hardcoded must change this in next revision
+        s->size = (uint64_t) 10737418240  >> SECTOR_SHIFT;
+	s->info = 0;
+
 	return 0;
 }
 
@@ -201,6 +205,8 @@ static int tdholey_open (struct disk_driver *dd, const char *name, td_flag_t fla
         	ret = 0 - errno;
         	goto done;
         }
+
+
 
         
 
@@ -282,8 +288,8 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
 		exit(1); 
           }
 	
-          posixbe_open(&storage, prv->storagename, O_RDWR);
-          posixbe_open(&snapshot, prv->cowname, O_RDWR);
+          posixbe_open(&storage, prv->storagename, O_RDWR | O_LARGEFILE);
+          posixbe_open(&snapshot, prv->cowname, O_RDWR | O_LARGEFILE);
           holey_open(&cow, &storage, &snapshot, max_size, fd);
           blockalign(&(prv->ba), &cow);
 
@@ -292,7 +298,8 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
         }
         
         ret = device_pread_sync(&(prv->ba), buf, size, offset);
-        if (ret != size) {
+        //TODO this must be changed when block align bug is fixed
+        if (ret != BLKSIZE) {
 			ret = 0 - errno;
 	} else {
 			ret = 1;

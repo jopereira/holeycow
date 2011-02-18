@@ -29,13 +29,13 @@ struct posixbe_data {
 	int fd;
 };
 
-static void posixbe_pwrite(struct device* dev, void* buf, size_t size, off_t offset, dev_callback_t cb, void* cookie) {
-	int ret=pwrite(D(dev)->fd, buf, size, offset);
+static void posixbe_pwrite(struct device* dev, void* buf, size_t size, OFF64 offset, dev_callback_t cb, void* cookie) {
+	int ret=pwrite64(D(dev)->fd, buf, size, offset);
 	cb(cookie, ret);
 }
 
-static void posixbe_pread(struct device* dev, void* buf, size_t size, off_t offset, dev_callback_t cb, void* cookie) {
-	int ret=pread(D(dev)->fd, buf, size, offset);
+static void posixbe_pread(struct device* dev, void* buf, size_t size, OFF64 offset, dev_callback_t cb, void* cookie) {
+	int ret=pread64(D(dev)->fd, buf, size, offset);
 	cb(cookie, ret);
 }
 
@@ -55,7 +55,7 @@ int posixbe_open(struct device* dev, char* path, int flags) {
 	dev->ops = &posixbe_device_ops;
 	dev->data = malloc(sizeof(struct posixbe_data));
 
-	int ret = open(path, flags, 0644);
+	int ret = open(path, flags);//, 0644);
 	if (ret>=0) {
 		D(dev)->fd = ret;
 		return 0;

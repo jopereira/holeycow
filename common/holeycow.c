@@ -144,7 +144,7 @@ static void master_cb(block_t id, void* cookie) {
 	device_pwrite(D(pend->dev)->storage, pend->data, BLKSIZE, pend->offset, master_cb2, pend);
 }
 
-static void master_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+static void master_pwrite(struct device* dev, void* data, size_t count, OFF64 offset, dev_callback_t cb, void* cookie) {
 
 	int done;
 	int ft;
@@ -171,7 +171,7 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off_t of
 		add_block(id, pend);
 }
 
-static void master_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+static void master_pread(struct device* dev, void* data, size_t count, OFF64 offset, dev_callback_t cb, void* cookie) {
 	device_pread(D(dev)->storage, data, count, offset, cb, cookie);
 }
 
@@ -206,7 +206,7 @@ static void slave_cb(block_t id, void* cookie) {
 	pthread_mutex_unlock(&D(dev)->mutex_cow);
 }
 
-static void slave_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+static void slave_pwrite(struct device* dev, void* data, size_t count,  OFF64 offset, dev_callback_t cb, void* cookie) {
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 
 	if (!test_and_set(dev, offset)) {
@@ -223,7 +223,7 @@ static void slave_pwrite(struct device* dev, void* data, size_t count, off_t off
 	}
 }
 
-static void slave_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+static void slave_pread(struct device* dev, void* data, size_t count, OFF64 offset, dev_callback_t cb, void* cookie) {
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	int copied = test(dev, offset);
 	pthread_mutex_unlock(&D(dev)->mutex_cow);
@@ -244,7 +244,7 @@ struct device_ops slave_device_ops = {
  * Blocked state
  */
 
-static void init_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+static void init_pwrite(struct device* dev, void* data, size_t count, OFF64 offset, dev_callback_t cb, void* cookie) {
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	while(!D(dev)->ready)
 		pthread_cond_wait(&D(dev)->init, &D(dev)->mutex_cow);
@@ -252,7 +252,7 @@ static void init_pwrite(struct device* dev, void* data, size_t count, off_t offs
 	dev->ops->pwrite(dev, data, count, offset, cb, cookie);
 }
 
-static void init_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+static void init_pread(struct device* dev, void* data, size_t count, OFF64 offset, dev_callback_t cb, void* cookie) {
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	while(!D(dev)->ready)
 		pthread_cond_wait(&D(dev)->init, &D(dev)->mutex_cow);
@@ -272,7 +272,7 @@ struct device_ops init_device_ops = {
 
 struct recovery_data {
 	struct device* dev;
-	off_t offset;
+	OFF64 offset;
 	char buffer[BLKSIZE];
 };
 

@@ -45,7 +45,7 @@ static void sync_cb(void* cookie, int ret) {
 	pthread_mutex_unlock(&data->mutex);
 }
 
-int device_pwrite_sync(struct device* dev, void* buf, size_t size, off_t offset) {
+int device_pwrite_sync(struct device* dev, void* buf, size_t size, OFF64 offset) {
 	struct cb_data data = {
 		PTHREAD_MUTEX_INITIALIZER,
 		PTHREAD_COND_INITIALIZER,
@@ -63,7 +63,7 @@ int device_pwrite_sync(struct device* dev, void* buf, size_t size, off_t offset)
 	return data.ret;
 }
 
-int device_pread_sync(struct device* dev, void* buf, size_t size, off_t offset) {
+int device_pread_sync(struct device* dev, void* buf, size_t size, OFF64 offset) {
 	struct cb_data data = {
 		PTHREAD_MUTEX_INITIALIZER,
 		PTHREAD_COND_INITIALIZER,
@@ -146,7 +146,7 @@ static void pread_cb(void* cookie, int ret) {
 	frag_cb(inc->frag, ret);
 }
 
-static void blockalign_pwrite(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+static void blockalign_pwrite(struct device* dev, void* data, size_t count, OFF64 offset, dev_callback_t cb, void* cookie) {
 	struct fragmented* frag = (struct fragmented*) malloc(sizeof(struct fragmented));
 	memset(frag, 0 , sizeof(*frag));
 
@@ -187,7 +187,7 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off_
 	frag_cb(frag, 0);
 }
 
-static void blockalign_pread(struct device* dev, void* data, size_t count, off_t offset, dev_callback_t cb, void* cookie) {
+static void blockalign_pread(struct device* dev, void* data, size_t count, OFF64 offset, dev_callback_t cb, void* cookie) {
 	struct fragmented* frag = (struct fragmented*) malloc(sizeof(struct fragmented));
 	memset(frag, 0 , sizeof(*frag));
 

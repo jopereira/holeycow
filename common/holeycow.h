@@ -26,6 +26,8 @@
 
 #define FDBITS 12
 
+#define OFF64 uint64_t
+
 #define FDMASK ((1<<FDBITS)-1)
 #define OFFMASK (~((1<<FDBITS)-1))
 #define BLKSIZE (1<<FDBITS)
@@ -38,8 +40,8 @@ struct device;
 typedef void (*dev_callback_t)(void* cookie, int ret);
 
 struct device_ops {
-	void (*pwrite)(struct device*, void*, size_t, off_t, dev_callback_t, void*);
-	void (*pread)(struct device*, void*, size_t, off_t, dev_callback_t, void*);
+	void (*pwrite)(struct device*, void*, size_t, OFF64, dev_callback_t, void*);
+	void (*pread)(struct device*, void*, size_t, OFF64, dev_callback_t, void*);
 	int (*close)(struct device*);
 };
 
@@ -53,8 +55,8 @@ struct device {
 #define device_close(dev) (dev)->ops->close(dev)
 
 /* Simulate synchronous I/O */
-extern int device_pwrite_sync(struct device*, void*, size_t, off_t);
-extern int device_pread_sync(struct device*, void*, size_t, off_t);
+extern int device_pwrite_sync(struct device*, void*, size_t, OFF64);
+extern int device_pread_sync(struct device*, void*, size_t, OFF64);
 
 /* Enforce block aligned I/O */
 extern void blockalign(struct device*, struct device*);
