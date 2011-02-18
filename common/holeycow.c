@@ -328,6 +328,25 @@ static void slave_init(struct device* dev) {
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
 }
 
+static void slave_cleanup(struct device* dev) {
+	int i;
+
+	// Block and flush pending writes
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	D(dev)->ready = 0;
+	dev->ops = &init_device_ops;
+	while(D(dev)->pw>0)
+		pthread_cond_wait(&D(dev)->blocked, &D(dev)->mutex_cow);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+	slave_stop();
+
+	for(i=0;i<D(dev)->max_size;i++)
+		if (test(dev, i)) {
+			printf("TODO: copy dirty block %d\n",i);
+		}
+}
+
 static void* ctrl_thread(void* arg) {
 	struct device* dev = (struct device*) arg;
 	char buffer[100];
@@ -343,6 +362,7 @@ static void* ctrl_thread(void* arg) {
 			cmd[++i]=strtok(NULL, " \t\n");
 
 		if (!strcmp(cmd[0], "makewriter")) {
+			slave_cleanup(dev);
 			for(j=0;j<(i-1)/2;j++) {
 				memset(slave+j, 0, sizeof(struct sockaddr_in));
 				slave[j].sin_family = AF_INET;

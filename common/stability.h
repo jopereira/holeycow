@@ -35,6 +35,7 @@ int add_block(block_t id, void*);
 void wait_sync(int dump);
 
 /* slave aka copier */
-int slave_stab(int sock, int s, int npool, callback_t cb, void* cookie);
+void slave_stab(int sock, int s, int npool, callback_t cb, void* cookie);
+void slave_stop();
 
 #endif

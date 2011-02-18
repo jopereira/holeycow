@@ -127,9 +127,10 @@ static void sender_thread_loop(struct slave* me) {
 
 		int size, v, est;
 
-		while(sn-me->ssize==0 && me->sock!=-1) {
+		/* This loop will be exited on cleanup, failing on write below.
+		   an returning. */
+		while(sn-me->ssize==0 && me->sock!=-1)
 			pthread_cond_wait(&notempty, &mux);
-		}
 
 		est=(st+me->ssize)%max;
                 
@@ -165,6 +166,8 @@ static void* sender_thread(void* param) {
 	while(!me->dead) {
 		me->sock=socket(PF_INET, SOCK_STREAM, 0);
 		if (connect(me->sock, (struct sockaddr*) me->addr, sizeof(struct sockaddr_in))<0) {
+			if (me->dead)
+				break;
 			sleep(1);
 			continue;
 		}
