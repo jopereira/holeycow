@@ -400,6 +400,8 @@ static void* ctrl_thread(void* arg) {
 	pre_init(dev);
 
 	while(fgets(buffer, 100, D(dev)->ctrl)!=NULL) {
+		fprintf(stderr, "coord: %s",buffer);
+
 		i=0;
 		cmd[i]=strtok(buffer, " \t\n");
 		while(cmd[i]!=NULL)
@@ -428,6 +430,8 @@ static void* ctrl_thread(void* arg) {
 			inet_aton(cmd[1], &slave[0].sin_addr);
 			del_slave(slave);
 		}
+
+		fprintf(stderr, "done\n");
 	}
 
 	// DANGER! Lost connection to controller.

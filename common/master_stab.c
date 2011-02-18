@@ -69,6 +69,7 @@ static void* receiver_thread(void* param) {
 
 		if (read(me->sock, &v, sizeof(v))!=sizeof(v)) {
 			pthread_mutex_lock(&mux);
+			shutdown(me->sock, SHUT_RD|SHUT_WR);
 			close(me->sock);
 			me->sock=-1;
 			pthread_mutex_unlock(&mux);
@@ -143,6 +144,7 @@ static void sender_thread_loop(struct slave* me) {
 		v=write(me->sock, buffer+est, size*sizeof(uint64_t));
 		if (v<=0 || (v%sizeof(uint64_t))) {
 			pthread_mutex_lock(&mux);
+			shutdown(me->sock, SHUT_RD|SHUT_WR);
 			close(me->sock);
 			me->sock=-1;
 			pthread_mutex_unlock(&mux);
@@ -267,6 +269,7 @@ void del_slave(struct sockaddr_in* addr) {
 	d=*p;
 	*p=d->next;
 
+	shutdown(d->sock, SHUT_RD|SHUT_WR);
 	close(d->sock);
 	d->sock=-1;
 	d->dead=1;

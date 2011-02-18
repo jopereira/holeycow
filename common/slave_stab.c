@@ -28,6 +28,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
 
 #include "stability.h"
 #include "holeycow.h"
@@ -99,6 +101,7 @@ static void* sender_thread(void* p) {
 
 		if (write(sock, &size, sizeof(size))!=sizeof(size)) {
 			pthread_mutex_lock(&mux);
+			shutdown(sock, SHUT_RD|SHUT_WR);
 			close(sock);
 			sock=-1;
 			pthread_mutex_unlock(&mux);
@@ -126,12 +129,13 @@ static void receiver_thread_loop() {
 	
 		if(size <= 0 || (size%sizeof(block_t))) {
 			pthread_mutex_lock(&mux);
+			shutdown(sock, SHUT_RD|SHUT_WR);
 			close(sock);
 			sock=-1;
 			pthread_mutex_unlock(&mux);
 			return;
 		}
-	
+
 		size/=sizeof(block_t);
 		h=(h+size)%max;
 
@@ -148,25 +152,37 @@ static void* receiver_thread(void* p) {
 	int len;
 	struct sockaddr_in master;
 
+	pthread_create(&sender, NULL, sender_thread, NULL);
+
 	while(sfd>=0) {
 		len=sizeof(master);
 		memset(&master, 0, sizeof(master));
 
 		sock = accept(sfd, (struct sockaddr*)&master, (socklen_t*)&len);
-		if (sfd<0)
+		if (sfd<0) {
+			if (errno==EWOULDBLOCK) {
+				sleep(1);
+				continue;
+			}
 			break;
+		}
 
-		pthread_create(&sender, NULL, sender_thread, NULL);
 		receiver_thread_loop();
-
-		pthread_join(sender, NULL);
 	}
+
+	pthread_join(sender, NULL);
 
 	return NULL;
 }
 
 void slave_stab(int s, int sz, int npool, callback_t cb, void* c) {
 	int i;
+
+    int flags;
+
+    if (-1 == (flags = fcntl(s, F_GETFL, 0)))
+        flags = 0;
+    fcntl(s, F_SETFL, flags | O_NONBLOCK);
 
 	max=sz;
 	buffer=(uint64_t*)calloc(sizeof(uint64_t), max);
@@ -193,6 +209,7 @@ void slave_stop() {
 
 	close(sfd);
 	sfd=-1;
+	shutdown(sock, SHUT_RD|SHUT_WR);
 	close(sock);
 	sock=-1;
 	pthread_cond_signal(&ready);
