@@ -92,6 +92,18 @@ static inline int test(struct device* dev, uint64_t id) {
 	return result;
 }
 
+static inline int rec_test(int* bitmap, uint64_t id) {
+
+	int result;
+   	uint64_t boff=(id&OFFMASK)>>FDBITS;
+
+	uint64_t idx=boff/(8*sizeof(int));
+	uint64_t mask=1LLU<<(boff%(8*sizeof(int)));
+
+	result=bitmap[idx]&mask;
+	return result;
+}
+
 static int holeycow_close(struct device* dev) {
 
 	/* TODO: assuming that reopen is on the same order */
@@ -255,17 +267,68 @@ struct device_ops init_device_ops = {
 };
 
 /*************************************************************
+ * Recovery
+ */
+
+struct recovery_data {
+	struct device* dev;
+	off_t offset;
+	char buffer[BLKSIZE];
+};
+
+static void recover_write_cb(void* cookie, int ret) {
+	assert(ret==BLKSIZE);
+
+	free(cookie);
+}
+
+static void recover_read_cb(void* cookie, int ret) {
+	struct recovery_data* data=(struct recovery_data*)cookie;
+
+	assert(ret==BLKSIZE);
+
+	master_pwrite(data->dev, data->buffer, BLKSIZE, data->offset, recover_write_cb, cookie);
+}
+
+/*************************************************************
  * CONTROLLER Functions
  */
 
 static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slave) {
 	int i;
 
+	// Block and flush pending writes
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	D(dev)->ready = 0;
+	dev->ops = &init_device_ops;
+	while(D(dev)->pw>0)
+		pthread_cond_wait(&D(dev)->blocked, &D(dev)->mutex_cow);
+	pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+	slave_stop();
+
+	int* oldbitmap=D(dev)->bitmap;
+	D(dev)->bitmap=(int*)calloc((D(dev)->max_size/BLKSIZE)/8+sizeof(int), 1);
+
 	master_stab(STAB_QUEUE, master_cb, 5);
 	for(i=0;i<nslaves;i++)
 		add_slave(slave+i);
 
+	for(i=0;i<D(dev)->max_size;i+=BLKSIZE) {
+		if (rec_test(oldbitmap, i)) {
+			struct recovery_data* data=(struct recovery_data*)malloc(sizeof(struct recovery_data));
+			data->dev=dev;
+			data->offset=i;
+			device_pread(D(dev)->snapshot, data->buffer, BLKSIZE, data->offset, recover_read_cb, data);
+		}
+	}
+
+	free(oldbitmap);
+
   	pthread_mutex_lock(&D(dev)->mutex_cow);
+
+	while(D(dev)->pw>0)
+		pthread_cond_wait(&D(dev)->blocked, &D(dev)->mutex_cow);
 
 	dev->ops = &master_device_ops;
 	D(dev)->ready = 1;
@@ -328,25 +391,6 @@ static void slave_init(struct device* dev) {
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
 }
 
-static void slave_cleanup(struct device* dev) {
-	int i;
-
-	// Block and flush pending writes
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
-	D(dev)->ready = 0;
-	dev->ops = &init_device_ops;
-	while(D(dev)->pw>0)
-		pthread_cond_wait(&D(dev)->blocked, &D(dev)->mutex_cow);
-  	pthread_mutex_unlock(&D(dev)->mutex_cow);
-
-	slave_stop();
-
-	for(i=0;i<D(dev)->max_size;i++)
-		if (test(dev, i)) {
-			printf("TODO: copy dirty block %d\n",i);
-		}
-}
-
 static void* ctrl_thread(void* arg) {
 	struct device* dev = (struct device*) arg;
 	char buffer[100];
@@ -362,7 +406,6 @@ static void* ctrl_thread(void* arg) {
 			cmd[++i]=strtok(NULL, " \t\n");
 
 		if (!strcmp(cmd[0], "makewriter")) {
-			slave_cleanup(dev);
 			for(j=0;j<(i-1)/2;j++) {
 				memset(slave+j, 0, sizeof(struct sockaddr_in));
 				slave[j].sin_family = AF_INET;

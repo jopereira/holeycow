@@ -35,7 +35,7 @@
 /* Generic asynchronous block device */
 struct device;
 
-typedef void (*dev_callback_t)(void*, int);
+typedef void (*dev_callback_t)(void* cookie, int ret);
 
 struct device_ops {
 	void (*pwrite)(struct device*, void*, size_t, off_t, dev_callback_t, void*);
