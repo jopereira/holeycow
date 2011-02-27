@@ -115,7 +115,10 @@ static void frag_cb(void* cookie, int ret) {
 
 	pthread_mutex_lock(&frag->mutex);
 
-	frag->ret += ret;
+	if (ret<0 || frag->ret<0)
+		frag->ret = -1;
+	else
+		frag->ret += ret;
 	frag->count--;
 
 	if (frag->count==0) {
@@ -129,22 +132,32 @@ static void frag_cb(void* cookie, int ret) {
 static void cleanup_cb(void* cookie, int ret) {
 	struct incomplete* inc = (struct incomplete*) cookie;
 
-	frag_cb(inc->frag, ret);
+	if (ret==BLKSIZE)
+		frag_cb(inc->frag, inc->bcount);
+	else
+		frag_cb(inc->frag, -1);
 	free(inc);
 }
 
 static void pwrite_cb(void* cookie, int ret) {
 	struct incomplete* inc = (struct incomplete*) cookie;
 
-	memcpy(inc->tmp+(inc->offset-inc->cursor), inc->buffer, inc->bcount);
-	device_pwrite(inc->dev, inc->tmp, BLKSIZE, inc->cursor, cleanup_cb, inc);
+	if (ret==BLKSIZE) {
+		memcpy(inc->tmp+(inc->offset-inc->cursor), inc->buffer, inc->bcount);
+		device_pwrite(inc->dev, inc->tmp, BLKSIZE, inc->cursor, cleanup_cb, inc);
+	} else
+		cleanup_cb(inc, -1);
 }
 
 static void pread_cb(void* cookie, int ret) {
 	struct incomplete* inc = (struct incomplete*) cookie;
 
-	memcpy(inc->buffer, inc->tmp+(inc->offset-inc->cursor), inc->bcount);
-	frag_cb(inc->frag, ret);
+	if (ret==BLKSIZE) {
+		memcpy(inc->buffer, inc->tmp+(inc->offset-inc->cursor), inc->bcount);
+		frag_cb(inc->frag, inc->bcount);
+	} else
+		frag_cb(inc->frag, -1);
+	free(inc);
 }
 
 static void blockalign_pwrite(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
