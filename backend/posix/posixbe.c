@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+#define _LARGEFILE64_SOURCE
 #include <unistd.h>
 #include <stdlib.h>
 
@@ -29,12 +30,12 @@ struct posixbe_data {
 	int fd;
 };
 
-static void posixbe_pwrite(struct device* dev, void* buf, size_t size, OFF64 offset, dev_callback_t cb, void* cookie) {
+static void posixbe_pwrite(struct device* dev, void* buf, size_t size, off64_t offset, dev_callback_t cb, void* cookie) {
 	int ret=pwrite64(D(dev)->fd, buf, size, offset);
 	cb(cookie, ret);
 }
 
-static void posixbe_pread(struct device* dev, void* buf, size_t size, OFF64 offset, dev_callback_t cb, void* cookie) {
+static void posixbe_pread(struct device* dev, void* buf, size_t size, off64_t offset, dev_callback_t cb, void* cookie) {
 	int ret=pread64(D(dev)->fd, buf, size, offset);
 	cb(cookie, ret);
 }

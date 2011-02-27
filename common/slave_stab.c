@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+#define _LARGEFILE64_SOURCE
 #include <stdlib.h>
 #include <pthread.h>
 #include <assert.h>

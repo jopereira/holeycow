@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
+#define _LARGEFILE64_SOURCE
 #include <sys/types.h> 
 #include <sys/socket.h> 
 #include <netinet/in.h>
@@ -27,6 +28,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <string.h>
 
 #include "holeycow.h"
 #include "stability.h"
