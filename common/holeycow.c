@@ -208,6 +208,7 @@ static void slave_cb(block_t id, void* cookie) {
 }
 
 static void slave_pwrite(struct device* dev, void* data, size_t count,  off64_t offset, dev_callback_t cb, void* cookie) {
+
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 
 	if (!test_and_set(dev, offset)) {
@@ -225,7 +226,7 @@ static void slave_pwrite(struct device* dev, void* data, size_t count,  off64_t 
 }
 
 static void slave_pread(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	pthread_mutex_lock(&D(dev)->mutex_cow);
 	int copied = test(dev, offset);
 	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
@@ -246,6 +247,7 @@ struct device_ops slave_device_ops = {
  */
 
 static void init_pwrite(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
+
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	while(!D(dev)->ready)
 		pthread_cond_wait(&D(dev)->init, &D(dev)->mutex_cow);
@@ -254,7 +256,7 @@ static void init_pwrite(struct device* dev, void* data, size_t count, off64_t of
 }
 
 static void init_pread(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	pthread_mutex_lock(&D(dev)->mutex_cow);
 	while(!D(dev)->ready)
 		pthread_cond_wait(&D(dev)->init, &D(dev)->mutex_cow);
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
@@ -400,6 +402,8 @@ static void* ctrl_thread(void* arg) {
 
 	pre_init(dev);
 
+
+
 	while(fgets(buffer, 100, D(dev)->ctrl)!=NULL) {
 		fprintf(stderr, "coord: %s",buffer);
 
@@ -408,6 +412,7 @@ static void* ctrl_thread(void* arg) {
 		while(cmd[i]!=NULL)
 			cmd[++i]=strtok(NULL, " \t\n");
 
+
 		if (!strcmp(cmd[0], "makewriter")) {
 			for(j=0;j<(i-1)/2;j++) {
 				memset(slave+j, 0, sizeof(struct sockaddr_in));
@@ -415,15 +420,18 @@ static void* ctrl_thread(void* arg) {
 				slave[j].sin_port = htons(atoi(cmd[j*2+2]));
 				inet_aton(cmd[j*2+1], &slave[j].sin_addr);
 			}
+
 			master_init(dev, j, slave);
-		} else if (!strcmp(cmd[0], "makecopier"))
+		} else if (!strcmp(cmd[0], "makecopier")){
 			slave_init(dev);
+                }
 		else if (!strcmp(cmd[0], "booted")) {
 			memset(slave, 0, sizeof(struct sockaddr_in));
 			slave[0].sin_family = AF_INET;
 			slave[0].sin_port = htons(atoi(cmd[2]));
 			inet_aton(cmd[1], &slave[0].sin_addr);
 			master_add_slave(dev, slave);
+
 		} else if (!strcmp(cmd[0], "failed")) {
 			memset(slave, 0, sizeof(struct sockaddr_in));
 			slave[0].sin_family = AF_INET;

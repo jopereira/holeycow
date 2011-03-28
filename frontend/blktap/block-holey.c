@@ -232,7 +232,7 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
         //int idvm,master, o_flags;
         //char realname[100];
         int ret;
-       
+
         if(firstread==0){        
            char path[200];
            int fd;
@@ -250,7 +250,6 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
           strcat(path,&prv->name[strlen(prv->name)-1]);
 
           newsockfd = make_named_socket (path);
-  
 
           size = sizeof(r);
           bcount= 0;
@@ -271,6 +270,7 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
 
           close(newsockfd);
           unlink(path);  
+
 
           fd=open(prv->storagename, O_RDWR);
 	  max_size=lseek(fd, 0, SEEK_END);
@@ -293,18 +293,20 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
           holey_open(&cow, &storage, &snapshot, max_size, fd);
           blockalign(&(prv->ba), &cow);
 
+          sleep(15);
 
           firstread=1;
         }
         
         ret = device_pread_sync(&(prv->ba), buf, size, offset);
         //TODO this must be changed when block align bug is fixed
-        if (ret != BLKSIZE) {
+        if (ret != size) {
 			ret = 0 - errno;
 	} else {
 			ret = 1;
 	} 
-        
+
+       
 
         return cb(dd, (ret < 0) ? ret: 0, sector, nb_sectors, id, private);
 
@@ -319,7 +321,8 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
 	struct   tdholey_state *prv = (struct tdholey_state *)dd->private;
 	int      size    = nb_sectors * s->sector_size;
 	uint64_t offset  = sector * (uint64_t)s->sector_size;
-        int ret;     
+        int ret;  
+
        
         ret = device_pwrite_sync(&(prv->ba), buf, size, offset);
         if (ret != size) {
@@ -327,7 +330,8 @@ static int tdholey_queue_write(struct disk_driver *dd, uint64_t sector,
 	} else {
 			ret = 1;
 	}
-       
+
+      
         return cb(dd, (ret < 0) ? ret: 0, sector, nb_sectors, id, private);
 }
 
