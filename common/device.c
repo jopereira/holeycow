@@ -161,7 +161,15 @@ static void pread_cb(void* cookie, int ret) {
 }
 
 static void blockalign_pwrite(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
-	struct fragmented* frag = (struct fragmented*) malloc(sizeof(struct fragmented));
+	struct fragmented* frag;
+
+	if (count == BLKSIZE && offset%BLKSIZE == 0) {
+		/* Fast path */
+		device_pwrite(D(dev)->impl, data, count, offset, cb, cookie);
+		return;
+	}
+
+	frag = (struct fragmented*) malloc(sizeof(struct fragmented));
 	memset(frag, 0 , sizeof(*frag));
 
 	frag->cb = cb;
@@ -202,7 +210,15 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off6
 }
 
 static void blockalign_pread(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
-	struct fragmented* frag = (struct fragmented*) malloc(sizeof(struct fragmented));
+	struct fragmented* frag;
+
+	if (count == BLKSIZE && offset%BLKSIZE == 0) {
+		/* Fast path */
+		device_pread(D(dev)->impl, data, count, offset, cb, cookie);
+		return;
+	}
+
+	frag = (struct fragmented*) malloc(sizeof(struct fragmented));
 	memset(frag, 0 , sizeof(*frag));
 
 	frag->cb = cb;

@@ -1,5 +1,5 @@
 
-CFLAGS = -g
+CFLAGS = -O3
 
 OBJS = holeycow.o master_stab.o slave_stab.o device.o
 
