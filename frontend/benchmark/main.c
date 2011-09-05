@@ -37,8 +37,8 @@ int main(int argc, char* argv[]) {
 	uint64_t max_size;
 	struct sockaddr_in coord;
 
-	if (argc!=3) {
-		fprintf(stderr, "usage: benchmark storage snapshot\n");
+	if (argc!=4) {
+		fprintf(stderr, "usage: benchmark storage snapshot port\n");
 		exit(1);
 	}
 
@@ -57,7 +57,7 @@ int main(int argc, char* argv[]) {
 
 	memset(&coord, 0, sizeof(struct sockaddr_in));
 	coord.sin_family = AF_INET;
-	coord.sin_port = htons(12345);
+	coord.sin_port = htons(atoi(argv[3]));
 	inet_aton("127.0.0.1", &coord.sin_addr);
 
 	if (connect(fd, (struct sockaddr*) &coord, sizeof(struct sockaddr_in))<0) {
