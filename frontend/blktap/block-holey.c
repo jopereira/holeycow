@@ -293,13 +293,14 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
           holey_open(&cow, &storage, &snapshot, max_size, fd);
           blockalign(&(prv->ba), &cow);
 
+          sleep(15);
 
           firstread=1;
         }
         
         ret = device_pread_sync(&(prv->ba), buf, size, offset);
         //TODO this must be changed when block align bug is fixed
-        if (ret != BLKSIZE) {
+        if (ret != size) {
 			ret = 0 - errno;
 	} else {
 			ret = 1;
