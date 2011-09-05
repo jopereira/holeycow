@@ -33,12 +33,13 @@
 
 int main(int argc, char* argv[]) {
 	int fd;
-	struct device storage, snapshot, cow, ba;
+	struct device storage, snapshot, cow, ba, *target;
 	uint64_t max_size;
 	struct sockaddr_in coord;
 
-	if (argc!=4) {
-		fprintf(stderr, "usage: benchmark storage snapshot port\n");
+	if (argc!=2 && argc!=4) {
+		fprintf(stderr, "HoleyCoW mode: benchmark storage snapshot port\n");
+		fprintf(stderr, "Standalone mode: benchmark storage\n");
 		exit(1);
 	}
 
@@ -53,24 +54,33 @@ int main(int argc, char* argv[]) {
 	max_size=lseek(fd, 0, SEEK_END);
 	close(fd);
 
-	fd=socket(PF_INET, SOCK_STREAM, 0);
-
-	memset(&coord, 0, sizeof(struct sockaddr_in));
-	coord.sin_family = AF_INET;
-	coord.sin_port = htons(atoi(argv[3]));
-	inet_aton("127.0.0.1", &coord.sin_addr);
-
-	if (connect(fd, (struct sockaddr*) &coord, sizeof(struct sockaddr_in))<0) {
-		perror("connect coordination");
-		exit(1);
-	}
-	
 	posixbe_open(&storage, argv[1], O_RDWR);
-	posixbe_open(&snapshot, argv[2], O_RDWR|O_CREAT);
-	holey_open(&cow, &storage, &snapshot, max_size, fd);
-	blockalign(&ba, &cow);
 
-	workload(&ba);
+	if (argc==2) {
+		/* Standalone mode */
+		target = &storage;
+	} else {
+		/* HoleyCoW mode */
+		fd=socket(PF_INET, SOCK_STREAM, 0);
+
+		memset(&coord, 0, sizeof(struct sockaddr_in));
+		coord.sin_family = AF_INET;
+		coord.sin_port = htons(atoi(argv[3]));
+		inet_aton("127.0.0.1", &coord.sin_addr);
+
+		if (connect(fd, (struct sockaddr*) &coord, sizeof(struct sockaddr_in))<0) {
+			perror("connect coordination");
+			exit(1);
+		}
+	
+		posixbe_open(&snapshot, argv[2], O_RDWR|O_CREAT);
+		holey_open(&cow, &storage, &snapshot, max_size, fd);
+		blockalign(&ba, &cow);
+	
+		target = &ba;
+	}
+
+	workload(target);
 
 	while(1)
 		pause();
