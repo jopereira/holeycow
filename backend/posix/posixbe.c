@@ -56,7 +56,7 @@ int posixbe_open(struct device* dev, char* path, int flags) {
 	dev->ops = &posixbe_device_ops;
 	dev->data = malloc(sizeof(struct posixbe_data));
 
-	int ret = open(path, flags);//, 0644);
+	int ret = open(path, flags, 0644);
 	if (ret>=0) {
 		D(dev)->fd = ret;
 		return 0;
