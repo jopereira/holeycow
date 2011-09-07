@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
 	if (aio)
 		aiobe_open(&storage, argv[optind], O_RDWR, 0);
 	else
-		posixbe_open(&storage, argv[optind], O_RDWR);
+		posixbe_open(&storage, argv[optind], O_RDWR, 0);
 
 	if (argc-optind==1) {
 		/* Standalone mode */
@@ -104,7 +104,7 @@ int main(int argc, char* argv[]) {
 		if (aio)
 			aiobe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
 		else
-			posixbe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT);
+			posixbe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
 		holey_open(&cow, &storage, &snapshot, max_size, fd);
 		blockalign(&ba, &cow);
 	

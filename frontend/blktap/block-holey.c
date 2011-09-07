@@ -288,8 +288,8 @@ static int tdholey_queue_read(struct disk_driver *dd, uint64_t sector,
 		exit(1); 
           }
 	
-          posixbe_open(&storage, prv->storagename, O_RDWR | O_LARGEFILE);
-          posixbe_open(&snapshot, prv->cowname, O_RDWR | O_LARGEFILE);
+          posixbe_open(&storage, prv->storagename, O_RDWR | O_LARGEFILE, 0);
+          posixbe_open(&snapshot, prv->cowname, O_RDWR | O_LARGEFILE, 0);
           holey_open(&cow, &storage, &snapshot, max_size, fd);
           blockalign(&(prv->ba), &cow);
 
