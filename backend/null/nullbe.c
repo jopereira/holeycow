@@ -32,6 +32,7 @@
 struct null_cb {
 	dev_callback_t cb;
 	void* cookie;
+	size_t size;
 };
 
 struct nullbe_data {
@@ -42,12 +43,13 @@ struct nullbe_data {
 	struct null_cb blocks[MAXPENDING];
 };
 
-static void add_cb(struct device* dev, dev_callback_t cb, void* cookie) {
+static void add_cb(struct device* dev, dev_callback_t cb, void* cookie, size_t size) {
 	pthread_mutex_lock(&D(dev)->mutex);
 	while(D(dev)->n>=MAXPENDING)
 		pthread_cond_wait(&D(dev)->full, &D(dev)->mutex);
 	D(dev)->blocks[D(dev)->h].cb = cb;
 	D(dev)->blocks[D(dev)->h].cookie = cookie;
+	D(dev)->blocks[D(dev)->h].size = size;
 	D(dev)->n++;
 	D(dev)->h=(D(dev)->h+1)%MAXPENDING;
 	pthread_cond_signal(&D(dev)->empty);
@@ -55,11 +57,11 @@ static void add_cb(struct device* dev, dev_callback_t cb, void* cookie) {
 }
 
 static void nullbe_pwrite(struct device* dev, void* buf, size_t size, off64_t offset, dev_callback_t cb, void* cookie) {
-	add_cb(dev, cb, cookie);
+	add_cb(dev, cb, cookie, size);
 }
 
 static void nullbe_pread(struct device* dev, void* buf, size_t size, off64_t offset, dev_callback_t cb, void* cookie) {
-	add_cb(dev, cb, cookie);
+	add_cb(dev, cb, cookie, size);
 }
 
 static int nullbe_close(struct device* dev) {
@@ -85,16 +87,18 @@ static void* worker(void* p) {
 	while(1) {
 		dev_callback_t cb;
 		void* cookie;
+		size_t size;
 		while(D(dev)->n==0 && !D(dev)->done)
 			pthread_cond_wait(&D(dev)->empty, &D(dev)->mutex);
 		if (D(dev)->n==0 && D(dev)->done)
 			return NULL;
 		cb = D(dev)->blocks[D(dev)->t].cb;
 		cookie = D(dev)->blocks[D(dev)->t].cookie;
+		size = D(dev)->blocks[D(dev)->t].size;
 		D(dev)->n--;
 		D(dev)->t=(D(dev)->t+1)%MAXPENDING;
 		pthread_mutex_unlock(&D(dev)->mutex);
-		cb(cookie, 0);
+		cb(cookie, size);
 		pthread_mutex_lock(&D(dev)->mutex);
 		pthread_cond_signal(&D(dev)->full);
 	}
