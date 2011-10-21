@@ -80,7 +80,7 @@ static inline int test_and_set(struct device* dev, uint64_t id) {
 	uint64_t boff=(id&OFFMASK)>>FDBITS;
 	
 	uint64_t idx=boff/(8*sizeof(int));
-	uint64_t mask=1LLU<<(boff%(8*sizeof(int))); 
+	int mask=1<<(boff%(8*sizeof(int))); 
 			
 	result=D(dev)->bitmap[idx]&mask;
 	D(dev)->bitmap[idx]|=mask;
@@ -93,7 +93,7 @@ static inline int test(struct device* dev, uint64_t id) {
    	uint64_t boff=(id&OFFMASK)>>FDBITS;
 	
 	uint64_t idx=boff/(8*sizeof(int));
-	uint64_t mask=1LLU<<(boff%(8*sizeof(int)));
+	int mask=1<<(boff%(8*sizeof(int)));
 
 	result=D(dev)->bitmap[idx]&mask;
 	return result;
@@ -105,7 +105,7 @@ static inline int rec_test(int* bitmap, uint64_t id) {
    	uint64_t boff=(id&OFFMASK)>>FDBITS;
 
 	uint64_t idx=boff/(8*sizeof(int));
-	uint64_t mask=1LLU<<(boff%(8*sizeof(int)));
+	int mask=1<<(boff%(8*sizeof(int)));
 
 	result=bitmap[idx]&mask;
 	return result;
@@ -178,7 +178,6 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
 		device_pwrite(D(dev)->storage, data, count, offset, master_end_write_cb, pend);
 	} else {
 		D(dev)->s_stdw++;
-		fprintf(stderr, "coiso\n");
 		add_block(id, pend);
 	}
 }
