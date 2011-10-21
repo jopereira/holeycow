@@ -32,28 +32,92 @@
 
 #include <holeycow.h>
 
+static int verify=0, maxthr=100, maxblk=1024, time;
+
+void* workload_thread(void* p) {
+	struct device* dev = (struct device*)p;
+	char bogus[BLKSIZE];
+	int i,j;
+
+	for(i=0;;i++) {
+		for(j=0;j<10;j++) {
+			int id=(random()%maxblk)|(random()%maxblk);
+			device_pread_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
+			if (verify && *(int*)bogus!=id) {
+				printf("expected %d got %d\n", id, *(int*)bogus);
+				exit(1);
+			}
+			device_pwrite_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
+			usleep(time);
+		}
+		printf("\r%d pages",i*10);
+		fflush(stdout);
+	}
+}
+
+void workload_init(struct device* dev) {
+	int i;
+
+	for(i=0;i<maxblk;i++)
+		device_pwrite_sync(dev, &i, sizeof(i), i*BLKSIZE);
+}
+
+void workload(struct device* dev) {
+	int i;
+	pthread_t load[maxthr];
+
+	for(i=0;i<maxthr;i++)
+		pthread_create(&load[i], NULL, workload_thread, dev);
+	for(i=0;i<maxthr;i++)
+		pthread_join(load[i], NULL);
+}
+
+
 void usage() {
 	fprintf(stderr, "HoleyCoW mode: benchmark storage snapshot\n");
 	fprintf(stderr, "Standalone mode: benchmark storage\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "\t-p port -- set HoleyCoW coordinator port (default: 12345)\n");
 	fprintf(stderr, "\t-a -- use asynchronous I/O (default: no)\n");
+	fprintf(stderr, "\t-n -- use null backend (default: no)\n");
+	fprintf(stderr, "\t-i -- initialize storage (default: no)\n");
+	fprintf(stderr, "\t-v -- verify data read (default: no)\n");
+	fprintf(stderr, "\t-t threads -- workload threads (default: 100)\n");
+	fprintf(stderr, "\t-b blocks -- storage size bits (default: 10, i.e. 1024 blocks)\n");
+	fprintf(stderr, "\t-r rate -- blocks/second (default: 1000)\n");
 	exit(1);
 }
 
 int main(int argc, char* argv[]) {
-	int fd, opt, aio=0, port=12345;
+	int fd, opt, aio=0, null=0, port=12345, init=0, rate=1000;
 	struct device storage, snapshot, cow, ba, *target;
-	uint64_t max_size;
 	struct sockaddr_in coord;
 
-	while((opt = getopt(argc, argv, "ap:"))!=-1) {
+	while((opt = getopt(argc, argv, "anip:t:b:vr:"))!=-1) {
 		switch(opt) {
 			case 'a':
 				aio = 1;
 				break;
+			case 'n':
+				null = 1;
+				break;
+			case 'i':
+				init = 1;
+				break;
 			case 'p':
 				port = atoi(optarg);
+				break;
+			case 't':
+				maxthr = atoi(optarg);
+				break;
+			case 'b':
+				maxblk = 1<<atoi(optarg);
+				break;
+			case 'r':
+				rate = atoi(optarg);
+				break;
+			case 'v':
+				verify = 1;
 				break;
 			default:
 				usage();
@@ -66,21 +130,26 @@ int main(int argc, char* argv[]) {
 		usage();
 	}
 
-	fd=open(argv[optind], O_RDWR|O_CREAT|O_EXCL, 0644);
-	if (fd>0) {
-		workload_init(fd);
-		printf("Initialized.\n");
-	} else {
-		fd=open(argv[1], O_RDWR);
-		printf("Opened.\n");
-	}
-	max_size=lseek(fd, 0, SEEK_END);
-	close(fd);
+	time = (int)(1000000/(((double)rate)/maxthr));
 
-	if (aio)
-		aiobe_open(&storage, argv[optind], O_RDWR, 0);
-	else
+	printf("Target IO rate: %.2lf blocks/second (%d threads)\n", ((double)1000000)*maxthr/time, maxthr);
+
+	if (null) {
+		printf("Null storage.\n");
+		nullbe_open(&storage);
+	} else if (aio) {
+		printf("Disk storage (AIO backend).\n");
+		aiobe_open(&storage, argv[optind], O_RDWR|O_DIRECT, 0);
+	} else {
+		printf("Disk storage (synchronous backend).\n");
 		posixbe_open(&storage, argv[optind], O_RDWR, 0);
+	}
+
+	if (!null && init) {
+		printf("Initializing storage: %d blocks of %d bytes\n", maxblk, BLKSIZE);
+		workload_init(&storage);
+	} else 
+		printf("Opened: %d blocks of %d bytes.\n", maxblk, BLKSIZE);
 
 	if (argc-optind==1) {
 		/* Standalone mode */
@@ -101,11 +170,13 @@ int main(int argc, char* argv[]) {
 			exit(1);
 		}
 	
-		if (aio)
+		if (null)
+			nullbe_open(&snapshot);
+		else if (aio)
 			aiobe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
 		else
 			posixbe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
-		holey_open(&cow, &storage, &snapshot, max_size, fd);
+		holey_open(&cow, &storage, &snapshot, maxblk*BLKSIZE, fd);
 		blockalign(&ba, &cow);
 	
 		target = &ba;
