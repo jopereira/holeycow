@@ -58,6 +58,12 @@ struct holeycow_data {
 	/* slave variables */
 	int sfd;
 	struct device* snapshot;
+
+	/* statistics */
+	/* storage: reads, writes, delayed writes */
+	int s_str, s_stw, s_stdw;
+	/* snapshot: reads, writes, forced reads */
+	int s_ssr, s_ssw, s_stfr;
 };
 
 struct pending {
@@ -123,7 +129,7 @@ static int holeycow_close(struct device* dev) {
  * MASTER Functions
  */
 
-static void master_cb2(void* cookie, int ret) {
+static void master_end_write_cb(void* cookie, int ret) {
 	struct pending* pend = (struct pending*) cookie; 
 
 	pthread_mutex_lock(&D(pend->dev)->mutex_cow);
@@ -135,14 +141,15 @@ static void master_cb2(void* cookie, int ret) {
 	free(pend);
 }
 
-static void master_cb(block_t id, void* cookie) {
+static void master_delayed_write_cb(block_t id, void* cookie) {
 	struct pending* pend = (struct pending*) cookie; 
 
 	pthread_mutex_lock(&D(pend->dev)->mutex_cow);
 	test_and_set(pend->dev, pend->offset);
 	pthread_mutex_unlock(&D(pend->dev)->mutex_cow);
 
-	device_pwrite(D(pend->dev)->storage, pend->data, BLKSIZE, pend->offset, master_cb2, pend);
+	D(pend->dev)->s_stw++;
+	device_pwrite(D(pend->dev)->storage, pend->data, BLKSIZE, pend->offset, master_end_write_cb, pend);
 }
 
 static void master_pwrite(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
@@ -166,13 +173,18 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
 	pend->cb = cb;
 	pend->cookie = cookie;
 
-	if (copied)
-		device_pwrite(D(dev)->storage, data, count, offset, master_cb2, pend);
-	else
+	if (copied) {
+		D(dev)->s_stw++;
+		device_pwrite(D(dev)->storage, data, count, offset, master_end_write_cb, pend);
+	} else {
+		D(dev)->s_stdw++;
+		fprintf(stderr, "coiso\n");
 		add_block(id, pend);
+	}
 }
 
 static void master_pread(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
+	D(dev)->s_str++;
 	device_pread(D(dev)->storage, data, count, offset, cb, cookie);
 }
 
@@ -197,6 +209,7 @@ static void slave_cb(block_t id, void* cookie) {
 	}
 	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
+	D(dev)->s_stfr++;
 	device_pread_sync(dev, buffer, BLKSIZE, id);
 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
@@ -220,6 +233,7 @@ static void slave_pwrite(struct device* dev, void* data, size_t count,  off64_t 
 	} else {
 		pthread_mutex_unlock(&D(dev)->mutex_cow);
 
+		D(dev)->s_ssw++;
 		device_pwrite(D(dev)->snapshot, data, count, offset, cb, cookie);
 	}
 }
@@ -229,10 +243,13 @@ static void slave_pread(struct device* dev, void* data, size_t count, off64_t of
 	int copied = test(dev, offset);
 	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
-	if (copied)
+	if (copied) {
+		D(dev)->s_ssr++;
 		device_pread(D(dev)->snapshot, data, count, offset, cb, cookie);
-	else
+	} else {
+		D(dev)->s_str++;
 		device_pread(D(dev)->storage, data, count, offset, cb, cookie);
+	}
 }
 
 struct device_ops slave_device_ops = {
@@ -311,7 +328,7 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 	int* oldbitmap=D(dev)->bitmap;
 	D(dev)->bitmap=(int*)calloc((D(dev)->max_size/BLKSIZE)/8+sizeof(int), 1);
 
-	master_stab(STAB_QUEUE, master_cb, 5);
+	master_stab(STAB_QUEUE, master_delayed_write_cb, 5);
 	for(i=0;i<nslaves;i++)
 		add_slave(slave+i);
 
@@ -392,6 +409,11 @@ static void slave_init(struct device* dev) {
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
 }
 
+void stats(struct device* dev) {
+	fprintf(D(dev)->ctrl, "stats %d %d %d %d %d %d\n", D(dev)->s_str, D(dev)->s_stw, D(dev)->s_stdw, D(dev)->s_ssr, D(dev)->s_ssw, D(dev)->s_stfr);
+	fflush(D(dev)->ctrl);
+}
+
 static void* ctrl_thread(void* arg) {
 	struct device* dev = (struct device*) arg;
 	char buffer[100];
@@ -401,7 +423,7 @@ static void* ctrl_thread(void* arg) {
 	pre_init(dev);
 
 	while(fgets(buffer, 100, D(dev)->ctrl)!=NULL) {
-		fprintf(stderr, "coord: %s",buffer);
+		fprintf(stderr, "coord: %s", buffer);
 
 		i=0;
 		cmd[i]=strtok(buffer, " \t\n");
@@ -430,6 +452,9 @@ static void* ctrl_thread(void* arg) {
 			slave[0].sin_port = htons(atoi(cmd[2]));
 			inet_aton(cmd[1], &slave[0].sin_addr);
 			del_slave(slave);
+		} else if (!strcmp(cmd[0], "stats")) {
+			fprintf(stderr, "fetching stats\n");
+			stats(dev);
 		}
 
 		fprintf(stderr, "done\n");
