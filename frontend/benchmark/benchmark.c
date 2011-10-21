@@ -50,7 +50,7 @@ void* workload_thread(void* p) {
 			device_pwrite_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
 			usleep(time);
 		}
-		printf("\r%d pages",i*10);
+		printf("\r%d pages",i*10*maxthr);
 		fflush(stdout);
 	}
 }
