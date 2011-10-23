@@ -197,7 +197,7 @@ static struct device_ops master_device_ops = {
  * Slave Functions
  */
 
-static void slave_cb(block_t id, void* cookie) {
+static void slave_cow_cb(block_t id, void* cookie) {
 	struct device* dev = (struct device*) cookie;
 	char buffer[BLKSIZE];
 
@@ -327,7 +327,7 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 	int* oldbitmap=D(dev)->bitmap;
 	D(dev)->bitmap=(int*)calloc((D(dev)->max_size/BLKSIZE)/8+sizeof(int), 1);
 
-	master_stab(STAB_QUEUE, master_delayed_write_cb, 5);
+	master_stab(STAB_QUEUE, master_delayed_write_cb, 20);
 	for(i=0;i<nslaves;i++)
 		add_slave(slave+i);
 
@@ -398,7 +398,7 @@ static void pre_init(struct device* dev) {
 }
 
 static void slave_init(struct device* dev) {
-	slave_stab(D(dev)->sfd, STAB_QUEUE, 5, slave_cb, dev);
+	slave_stab(D(dev)->sfd, STAB_QUEUE, 20, slave_cow_cb, dev);
 
 	pthread_mutex_lock(&D(dev)->mutex_cow);
 	dev->ops = &slave_device_ops;
