@@ -52,6 +52,9 @@ static void* cookie;
 
 static pthread_t sender, receiver, pool;
 
+/* Statistics */
+int s_s_num, s_s_size;
+
 static void* pool_thread(void* p) {
 	pthread_mutex_lock(&mux);
 	while(1) {
@@ -108,8 +111,11 @@ static void* sender_thread(void* p) {
 			pthread_mutex_unlock(&mux);
 			return NULL;
 		}
+	
+		s_s_size+=size;
+		s_s_num++;
 
-		usleep(1000);
+		usleep(50000);
 	}
 }
 

@@ -61,6 +61,9 @@ static callback_t callback;
 
 static pthread_t pool;
 
+/* Statistics */
+int s_m_num, s_m_size;
+
 static void* receiver_thread(void* param) {
 	struct slave* me=(struct slave*)param, *p;
 
@@ -153,7 +156,10 @@ static void sender_thread_loop(struct slave* me) {
 			return;
 		}
 
-		usleep(1000);
+		usleep(50000);
+
+		s_m_size+=size;
+		s_m_num++;
 
 		pthread_mutex_lock(&mux);
 

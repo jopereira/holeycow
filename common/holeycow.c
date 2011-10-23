@@ -409,7 +409,8 @@ static void slave_init(struct device* dev) {
 }
 
 void stats(struct device* dev) {
-	fprintf(D(dev)->ctrl, "stats %d %d %d %d %d %d\n", D(dev)->s_str, D(dev)->s_stw, D(dev)->s_stdw, D(dev)->s_ssr, D(dev)->s_ssw, D(dev)->s_stfr);
+	extern int s_m_num, s_m_size, s_s_num, s_s_size;
+	fprintf(D(dev)->ctrl, "stats %d %d %d %d %d %d %d %d\n", D(dev)->s_str, D(dev)->s_stw, D(dev)->s_stdw, D(dev)->s_ssr, D(dev)->s_ssw, D(dev)->s_stfr, (s_m_num+s_s_num), (s_m_size+s_s_size));
 	fflush(D(dev)->ctrl);
 }
 
@@ -452,7 +453,6 @@ static void* ctrl_thread(void* arg) {
 			inet_aton(cmd[1], &slave[0].sin_addr);
 			del_slave(slave);
 		} else if (!strcmp(cmd[0], "stats")) {
-			fprintf(stderr, "fetching stats\n");
 			stats(dev);
 		}
 
