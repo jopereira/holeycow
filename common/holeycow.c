@@ -423,7 +423,8 @@ static void* ctrl_thread(void* arg) {
 	pre_init(dev);
 
 	while(fgets(buffer, 100, D(dev)->ctrl)!=NULL) {
-		fprintf(stderr, "coord: %s", buffer);
+		if (strncmp(buffer, "stats", 5))
+			fprintf(stderr, "coord: %s", buffer);
 
 		i=0;
 		cmd[i]=strtok(buffer, " \t\n");
@@ -454,6 +455,7 @@ static void* ctrl_thread(void* arg) {
 			del_slave(slave);
 		} else if (!strcmp(cmd[0], "stats")) {
 			stats(dev);
+			continue;
 		}
 
 		fprintf(stderr, "done\n");

@@ -34,10 +34,16 @@
 
 static int verify=0, maxthr=100, maxblk=1024, time;
 
+pthread_mutex_t mtx;
+int cnt;
+struct timeval start;
+
 void* workload_thread(void* p) {
 	struct device* dev = (struct device*)p;
 	char bogus[BLKSIZE];
 	int i,j;
+	struct timeval now;
+	double elapsed;
 
 	for(i=0;;i++) {
 		for(j=0;j<10;j++) {
@@ -50,7 +56,12 @@ void* workload_thread(void* p) {
 			device_pwrite_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
 			usleep(time);
 		}
-		printf("\r%d pages",i*10*maxthr);
+		pthread_mutex_lock(&mtx);
+		cnt+=10;
+		gettimeofday(&now, NULL);
+		elapsed=now.tv_sec-start.tv_sec+(now.tv_usec-start.tv_usec)/(double)1e6;
+		printf("\r%.2lf pages/s",cnt/elapsed);
+		pthread_mutex_unlock(&mtx);
 		fflush(stdout);
 	}
 }
@@ -65,6 +76,9 @@ void workload_init(struct device* dev) {
 void workload(struct device* dev) {
 	int i;
 	pthread_t load[maxthr];
+
+	pthread_mutex_init(&mtx, NULL);
+	gettimeofday(&start, NULL);
 
 	for(i=0;i<maxthr;i++)
 		pthread_create(&load[i], NULL, workload_thread, dev);
