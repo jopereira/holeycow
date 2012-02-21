@@ -22,7 +22,7 @@
 #ifndef __POSIXBE__
 #define __POSIXBE__
 
-#include <holeycow.h>
+#include <common/holeycow.h>
 
 extern int nullbe_open(struct device* dev);
 

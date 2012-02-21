@@ -30,7 +30,7 @@
 #include <assert.h>
 #include <unistd.h>
 
-#include <holeycow.h>
+#include <common/holeycow.h>
 
 static int verify=0, maxthr=100, maxblk=1024, time;
 

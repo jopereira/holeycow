@@ -22,7 +22,7 @@
 #ifndef __AIOBE
 #define __AIOBE
 
-#include <holeycow.h>
+#include <common/holeycow.h>
 
 extern int aiobe_open(struct device* dev, char* path, int flags, mode_t mode);
 

@@ -22,7 +22,7 @@
 #ifndef __POSIXBE__
 #define __POSIXBE__
 
-#include <holeycow.h>
+#include <common/holeycow.h>
 
 extern int posixbe_open(struct device* dev, char* path, int flags, mode_t mode);
 
