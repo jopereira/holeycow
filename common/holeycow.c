@@ -181,7 +181,6 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	while(done<count) {
 		uint64_t id=(offset+done)&OFFMASK;
-		D(dev)->pw++;
 		if (!test(dev, id)) {
 			D(dev)->s_stdw++;
 			pend->blocks++;
@@ -190,6 +189,8 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
 			D(dev)->s_stw++;
 		done+=BLKSIZE;
 	}
+
+	D(dev)->pw++;
 
 	if (pend->blocks==0) {
 		pthread_mutex_unlock(&D(dev)->mutex_cow);
@@ -225,7 +226,7 @@ static void slave_cow_cb(block_t id, void* cookie) {
 	}
 
 	D(dev)->s_stfr++;
-	device_pread_sync(dev, buffer, BLKSIZE, id);
+	device_pread_sync(D(dev)->storage, buffer, BLKSIZE, id);
 	device_pwrite_sync(D(dev)->snapshot, buffer, BLKSIZE, id);
 
 	test_and_set(dev, id);
