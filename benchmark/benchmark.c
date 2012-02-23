@@ -40,15 +40,16 @@ struct timeval start;
 
 void* workload_thread(void* p) {
 	struct device* dev = (struct device*)p;
-	char bogus[BLKSIZE*length];
+	char* bogus;
 	int i,j;
 	struct timeval now;
 	double elapsed;
 
+	bogus=malloc(BLKSIZE*length);
 	for(i=0;;i++) {
 		for(j=0;j<10;j++) {
 			struct timeval before;
-			int id=(random()%(maxblk-length+1))|(random()%(maxblk-length+1));
+			int id=(random()%(maxblk-length+1));
 			if (verbose) {
 				gettimeofday(&before, NULL);
 				printf("begin read %d %d\n", id, length);
@@ -79,10 +80,11 @@ void* workload_thread(void* p) {
 		cnt+=10;
 		gettimeofday(&now, NULL);
 		elapsed=now.tv_sec-start.tv_sec+(now.tv_usec-start.tv_usec)/(double)1e6;
-		printf("\r%.2lf pages/s",cnt/elapsed);
+		printf("\r%.2lf pages/s",cnt*length/elapsed);
 		pthread_mutex_unlock(&mtx);
 		fflush(stdout);
 	}
+	free(bogus);
 }
 
 void workload_init(struct device* dev) {
@@ -117,7 +119,7 @@ void usage() {
 	fprintf(stderr, "\t-l -- request length in pages (default: 1)\n");
 	fprintf(stderr, "\t-f -- verify data read (default: no)\n");
 	fprintf(stderr, "\t-t threads -- workload threads (default: 100)\n");
-	fprintf(stderr, "\t-b blocks -- storage size bits (default: 10, i.e. 1024 blocks)\n");
+	fprintf(stderr, "\t-b blocks -- storage size (default: 1024 blocks)\n");
 	fprintf(stderr, "\t-r rate -- blocks/second (default: 1000)\n");
 	fprintf(stderr, "\t-v -- verbose (default: no)\n");
 	exit(1);
@@ -146,7 +148,7 @@ int main(int argc, char* argv[]) {
 				maxthr = atoi(optarg);
 				break;
 			case 'b':
-				maxblk = 1<<atoi(optarg);
+				maxblk = atoi(optarg);
 				break;
 			case 'r':
 				rate = atoi(optarg);
@@ -173,7 +175,7 @@ int main(int argc, char* argv[]) {
 
 	time = (int)(1000000/(((double)rate)/maxthr));
 
-	printf("Target IO rate: %.2lf blocks/second (%d threads)\n", ((double)1000000)*maxthr/time, maxthr);
+	printf("Target IO rate: %.2lf blocks/second (%d threads)\n", ((double)1000000)*maxthr*length/time, maxthr);
 
 	if (null) {
 		printf("Null storage.\n");
@@ -189,8 +191,15 @@ int main(int argc, char* argv[]) {
 	if (!null && init) {
 		printf("Initializing storage: %d blocks of %d bytes\n", maxblk, BLKSIZE);
 		workload_init(&storage);
-	} else 
+	} else {
+		struct stat sbuf;
+		if (stat(argv[optind], &sbuf)<0) {
+			perror(argv[optind]);
+			exit(1);
+		}
+		maxblk = sbuf.st_size/BLKSIZE;
 		printf("Opened: %d blocks of %d bytes.\n", maxblk, BLKSIZE);
+	}
 
 	if (argc-optind==1) {
 		/* Standalone mode */
