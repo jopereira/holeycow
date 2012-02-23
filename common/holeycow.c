@@ -70,6 +70,7 @@ struct pending {
 	struct device* dev;
 	void* data;
 	uint64_t offset;
+	int blocks;
 	dev_callback_t cb;
 	void* cookie;
 };
@@ -144,9 +145,16 @@ static void master_end_write_cb(void* cookie, int ret) {
 static void master_delayed_write_cb(block_t id, void* cookie) {
 	struct pending* pend = (struct pending*) cookie; 
 
+	int done = 0;
+
 	pthread_mutex_lock(&D(pend->dev)->mutex_cow);
 	test_and_set(pend->dev, pend->offset);
+	if (--pend->blocks == 0)
+		done = 1;
 	pthread_mutex_unlock(&D(pend->dev)->mutex_cow);
+
+	if (!done)
+		return;
 
 	D(pend->dev)->s_stw++;
 	device_pwrite(D(pend->dev)->storage, pend->data, BLKSIZE, pend->offset, master_end_write_cb, pend);
@@ -154,32 +162,37 @@ static void master_delayed_write_cb(block_t id, void* cookie) {
 
 static void master_pwrite(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
 
-	int done;
+	size_t done;
 	int ft;
 	int res;
 
-	uint64_t id=offset&OFFMASK;
 	uint64_t boff=offset>>FDBITS;
-
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
-	int copied = test(dev, id);
-	D(dev)->pw++;
-	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
 	struct pending* pend=(struct pending*) malloc(sizeof(struct pending)); 
 	pend->dev = dev;
 	pend->data = data;
 	pend->offset = offset;
+	pend->blocks = 0;
 	pend->cb = cb;
 	pend->cookie = cookie;
 
-	if (copied) {
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	while(done<count) {
+		uint64_t id=offset&OFFMASK;
+		D(dev)->pw++;
+		if (!test(dev, id)) {
+			D(dev)->s_stdw++;
+			pend->blocks++;
+			add_block(id, pend);
+		} else
+			D(dev)->s_stw++;
+	}
+	pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+	if (pend->blocks==0) {
 		D(dev)->s_stw++;
 		device_pwrite(D(dev)->storage, data, count, offset, master_end_write_cb, pend);
-	} else {
-		D(dev)->s_stdw++;
-		add_block(id, pend);
-	}
+	} 
 }
 
 static void master_pread(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
