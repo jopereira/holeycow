@@ -70,6 +70,7 @@ struct holeycow_data {
 struct pending {
 	struct device* dev;
 	void* data;
+	size_t count;
 	uint64_t offset;
 	int blocks;
 	int ret;
@@ -151,6 +152,7 @@ static void master_delayed_write_cb(block_t id, void* cookie) {
 
 	pthread_mutex_lock(&D(pend->dev)->mutex_cow);
 	test_and_set(pend->dev, pend->offset);
+	D(pend->dev)->s_stw++;
 	if (--pend->blocks == 0)
 		done = 1;
 	pthread_mutex_unlock(&D(pend->dev)->mutex_cow);
@@ -158,8 +160,7 @@ static void master_delayed_write_cb(block_t id, void* cookie) {
 	if (!done)
 		return;
 
-	D(pend->dev)->s_stw++;
-	device_pwrite(D(pend->dev)->storage, pend->data, BLKSIZE, pend->offset, master_end_write_cb, pend);
+	device_pwrite(D(pend->dev)->storage, pend->data, pend->count, pend->offset, master_end_write_cb, pend);
 }
 
 static void master_pwrite(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
@@ -174,7 +175,8 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
 	pend->dev = dev;
 	pend->data = data;
 	pend->offset = offset;
-	pend->blocks = 0;
+	pend->count = count;
+	pend->blocks = 1;
 	pend->cb = cb;
 	pend->cookie = cookie;
 
@@ -184,7 +186,9 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
 		if (!test(dev, id)) {
 			D(dev)->s_stdw++;
 			pend->blocks++;
+  			pthread_mutex_unlock(&D(dev)->mutex_cow);
 			add_block(id, pend);
+  			pthread_mutex_lock(&D(dev)->mutex_cow);
 		} else
 			D(dev)->s_stw++;
 		done+=BLKSIZE;
@@ -192,16 +196,15 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
 
 	D(dev)->pw++;
 
-	if (pend->blocks==0) {
+	if (--pend->blocks==0) {
 		pthread_mutex_unlock(&D(dev)->mutex_cow);
-		D(dev)->s_stw++;
 		device_pwrite(D(dev)->storage, data, count, offset, master_end_write_cb, pend);
 	} else
 		pthread_mutex_unlock(&D(dev)->mutex_cow);
 }
 
 static void master_pread(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
-	D(dev)->s_str++;
+	D(dev)->s_str+=count/BLKSIZE;
 	device_pread(D(dev)->storage, data, count, offset, cb, cookie);
 }
 
