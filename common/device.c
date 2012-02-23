@@ -163,7 +163,7 @@ static void pread_cb(void* cookie, int ret) {
 static void blockalign_pwrite(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
 	struct fragmented* frag;
 
-	if (count == BLKSIZE && offset%BLKSIZE == 0) {
+	if (count%BLKSIZE == 0 && offset%BLKSIZE == 0) {
 		/* Fast path */
 		device_pwrite(D(dev)->impl, data, count, offset, cb, cookie);
 		return;
@@ -184,9 +184,11 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off6
 		pthread_mutex_unlock(&frag->mutex);
 
 		uint64_t cursor=offset & OFFMASK;
-		int bcount = offset+count > cursor+BLKSIZE ? cursor+BLKSIZE-offset : count;
+		int bcount;
 				
-		if (bcount!=BLKSIZE) {
+		if (cursor != offset || count<BLKSIZE) {
+			bcount = offset+count > cursor+BLKSIZE ? cursor+BLKSIZE-offset : count;
+
 			struct incomplete* inc = (struct incomplete*) malloc(sizeof(struct incomplete)+BLKSIZE);
 			memset(inc, 0 , sizeof(*inc));
 
@@ -198,9 +200,11 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off6
 			inc->buffer = data;
 
 			device_pread(D(dev)->impl, inc->tmp, BLKSIZE, cursor, pwrite_cb, inc);
-		} else
-			device_pwrite(D(dev)->impl, data, BLKSIZE, cursor, frag_cb, frag);
+		} else {
+			bcount = count%BLKSIZE;
 
+			device_pwrite(D(dev)->impl, data, bcount, cursor, frag_cb, frag);
+		}
 		offset+=bcount;
 		count-=bcount;
 		data+=bcount;
@@ -212,7 +216,7 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off6
 static void blockalign_pread(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
 	struct fragmented* frag;
 
-	if (count == BLKSIZE && offset%BLKSIZE == 0) {
+	if (count%BLKSIZE == 0 && offset%BLKSIZE == 0) {
 		/* Fast path */
 		device_pread(D(dev)->impl, data, count, offset, cb, cookie);
 		return;
@@ -233,9 +237,11 @@ static void blockalign_pread(struct device* dev, void* data, size_t count, off64
 		pthread_mutex_unlock(&frag->mutex);
 
 		uint64_t cursor=offset & OFFMASK;
-		int bcount = offset+count > cursor+BLKSIZE ? cursor+BLKSIZE-offset : count;
+		int bcount;
 				
-		if (bcount!=BLKSIZE) {
+		if (cursor != offset || count<BLKSIZE) {
+			bcount = offset+count > cursor+BLKSIZE ? cursor+BLKSIZE-offset : count;
+
 			struct incomplete* inc = (struct incomplete*) malloc(sizeof(struct incomplete)+BLKSIZE);
 			memset(inc, 0 , sizeof(*inc));
 
@@ -246,8 +252,10 @@ static void blockalign_pread(struct device* dev, void* data, size_t count, off64
 			inc->buffer = data;
 
 			device_pread(D(dev)->impl, inc->tmp, BLKSIZE, cursor, pread_cb, inc);
-		} else
-			device_pread(D(dev)->impl, data, BLKSIZE, cursor, frag_cb, frag);
+		} else {
+			bcount = count%BLKSIZE;
+			device_pread(D(dev)->impl, data, bcount, cursor, frag_cb, frag);
+		}
 
 		offset+=bcount;
 		count-=bcount;
