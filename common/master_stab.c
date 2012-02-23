@@ -38,6 +38,7 @@ static block_t* buffer;
 static void** cookiejar;
 static int max, h;		/* capacity and head */
 static int st, sn;		/* sender tail and size */
+static int wn;			/* slots away */
 static int rt, rn;		/* receiver tail and size */
 static int ft, fn;		/* fsync tail and size */
 
@@ -93,6 +94,7 @@ static void* receiver_thread(void* param) {
 			for(p=slaves; p!=NULL; p=p->next)
 				p->rsize-=size;
 
+			wn-=size;
 			rn+=size;
 
 			pthread_cond_broadcast(&ready);
@@ -120,6 +122,7 @@ static void gc_slaves() {
 
 		st=(st+size)%max;
 		sn-=size;
+		wn+=size;
 
 		assert(sn>=0);
 	}
@@ -298,7 +301,7 @@ int add_block(block_t id, void* cookie) {
 
 	pthread_mutex_lock(&mux);
 
-	while(rn+sn+fn>=max)
+	while(rn+sn+wn+fn>=max)
 		pthread_cond_wait(&sync1,&mux);
 
 	buffer[h]=id;

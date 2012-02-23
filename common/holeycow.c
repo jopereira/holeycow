@@ -181,6 +181,7 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
 	pend->cookie = cookie;
 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
+	D(dev)->pw++;
 	while(done<count) {
 		uint64_t id=(offset+done)&OFFMASK;
 		if (!test(dev, id)) {
@@ -193,8 +194,6 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
 			D(dev)->s_stw++;
 		done+=BLKSIZE;
 	}
-
-	D(dev)->pw++;
 
 	if (--pend->blocks==0) {
 		pthread_mutex_unlock(&D(dev)->mutex_cow);
