@@ -212,6 +212,7 @@ static void* pool_thread(void* p) {
 		pthread_mutex_lock(&mux);
 
 		buffer[idx]=-1;
+		cookiejar[idx]=NULL;
 
 		while(fn>0 && buffer[ft]==-1) {
 			fn--;
@@ -297,7 +298,8 @@ int add_block(block_t id, void* cookie) {
 
 	pthread_mutex_lock(&mux);
 
-	assert(rn!=max);
+	while(rn+sn+fn>=max)
+		pthread_cond_wait(&sync1,&mux);
 
 	buffer[h]=id;
 	cookiejar[h]=cookie;
