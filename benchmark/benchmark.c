@@ -32,7 +32,7 @@
 
 #include <common/holeycow.h>
 
-static int verify=0, maxthr=100, maxblk=1024, time, length=1, verbose=0;
+static int verify=0, maxthr=100, maxblk=1024, time, length=1, verbose=0, align=1;
 
 pthread_mutex_t mtx;
 int cnt;
@@ -50,11 +50,19 @@ void* workload_thread(void* p) {
 		for(j=0;j<10;j++) {
 			struct timeval before;
 			int id=(random()%(maxblk-length+1));
-			if (verbose) {
-				gettimeofday(&before, NULL);
-				printf("begin read %d %d\n", id, length);
+			int offset=id*BLKSIZE;
+			int count=BLKSIZE*length;
+			int noise=0;
+			if (!align) {
+				noise=random()%((BLKSIZE-2)/2);
+				offset+=noise;
+				count-=noise*2;
 			}
-			device_pread_sync(dev, bogus, BLKSIZE*length, id*BLKSIZE);
+			if (verbose) {
+				printf("begin read %d %d %d\n", id, length, noise);
+				gettimeofday(&before, NULL);
+			}
+			device_pread_sync(dev, bogus, count, offset);
 			if (verbose) {
 				gettimeofday(&now, NULL);
 				elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
@@ -66,9 +74,9 @@ void* workload_thread(void* p) {
 			}
 			if (verbose) {
 				gettimeofday(&before, NULL);
-				printf("begin write %d %d\n", id, length);
+				printf("begin write %d %d %d\n", id, length, noise);
 			}
-			device_pwrite_sync(dev, bogus, BLKSIZE*length, id*BLKSIZE);
+			device_pwrite_sync(dev, bogus, count, offset);
 			if (verbose) {
 				gettimeofday(&now, NULL);
 				elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
@@ -120,6 +128,7 @@ void usage() {
 	fprintf(stderr, "\t-f -- verify data read (default: no)\n");
 	fprintf(stderr, "\t-t threads -- workload threads (default: 100)\n");
 	fprintf(stderr, "\t-b blocks -- storage size (default: 1024 blocks)\n");
+	fprintf(stderr, "\t-u -- unaligned blocks (default: no)\n");
 	fprintf(stderr, "\t-r rate -- blocks/second (default: 1000)\n");
 	fprintf(stderr, "\t-v -- verbose (default: no)\n");
 	exit(1);
@@ -130,7 +139,7 @@ int main(int argc, char* argv[]) {
 	struct device storage, snapshot, cow, ba, *target;
 	struct sockaddr_in coord;
 
-	while((opt = getopt(argc, argv, "anip:t:b:vr:l:f"))!=-1) {
+	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fu"))!=-1) {
 		switch(opt) {
 			case 'a':
 				aio = 1;
@@ -152,6 +161,9 @@ int main(int argc, char* argv[]) {
 				break;
 			case 'r':
 				rate = atoi(optarg);
+				break;
+			case 'u':
+				align = 0;
 				break;
 			case 'f':
 				verify = 1;
