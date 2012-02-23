@@ -58,6 +58,7 @@ struct holeycow_data {
 	/* slave variables */
 	int sfd;
 	struct device* snapshot;
+	pthread_mutex_t mutex_busy; 
 
 	/* statistics */
 	/* storage: reads, writes, delayed writes */
@@ -71,6 +72,7 @@ struct pending {
 	void* data;
 	uint64_t offset;
 	int blocks;
+	int ret;
 	dev_callback_t cb;
 	void* cookie;
 };
@@ -162,7 +164,7 @@ static void master_delayed_write_cb(block_t id, void* cookie) {
 
 static void master_pwrite(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
 
-	size_t done;
+	size_t done=0;
 	int ft;
 	int res;
 
@@ -178,7 +180,7 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	while(done<count) {
-		uint64_t id=offset&OFFMASK;
+		uint64_t id=(offset+done)&OFFMASK;
 		D(dev)->pw++;
 		if (!test(dev, id)) {
 			D(dev)->s_stdw++;
@@ -186,13 +188,15 @@ static void master_pwrite(struct device* dev, void* data, size_t count, off64_t 
 			add_block(id, pend);
 		} else
 			D(dev)->s_stw++;
+		done+=BLKSIZE;
 	}
-	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
 	if (pend->blocks==0) {
+		pthread_mutex_unlock(&D(dev)->mutex_cow);
 		D(dev)->s_stw++;
 		device_pwrite(D(dev)->storage, data, count, offset, master_end_write_cb, pend);
-	} 
+	} else
+		pthread_mutex_unlock(&D(dev)->mutex_cow);
 }
 
 static void master_pread(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
@@ -219,49 +223,101 @@ static void slave_cow_cb(block_t id, void* cookie) {
 		pthread_mutex_unlock(&D(dev)->mutex_cow);
 		return;
 	}
-	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
 	D(dev)->s_stfr++;
 	device_pread_sync(dev, buffer, BLKSIZE, id);
+	device_pwrite_sync(D(dev)->snapshot, buffer, BLKSIZE, id);
 
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
-
-	if (!test_and_set(dev, id))
-		device_pwrite_sync(D(dev)->snapshot, buffer, BLKSIZE, id);
+	test_and_set(dev, id);
 
 	pthread_mutex_unlock(&D(dev)->mutex_cow);
 }
 
 static void slave_pwrite(struct device* dev, void* data, size_t count,  off64_t offset, dev_callback_t cb, void* cookie) {
   	pthread_mutex_lock(&D(dev)->mutex_cow);
-
-	if (!test_and_set(dev, offset)) {
-
-		int ret=device_pwrite_sync(D(dev)->snapshot, data, count, offset);
-
-		pthread_mutex_unlock(&D(dev)->mutex_cow);
-
-		cb(cookie, ret);
-	} else {
-		pthread_mutex_unlock(&D(dev)->mutex_cow);
-
+	int bcount;
+	for(bcount = 0;bcount<count;bcount+=BLKSIZE) {
+		test_and_set(dev, offset+bcount);
 		D(dev)->s_ssw++;
-		device_pwrite(D(dev)->snapshot, data, count, offset, cb, cookie);
 	}
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+	device_pwrite(D(dev)->snapshot, data, count, offset, cb, cookie);
+}
+
+static void slave_end_read_cb(void* cookie, int ret) {
+	struct pending* pend = (struct pending*) cookie; 
+	int done = 0;
+
+	pthread_mutex_lock(&D(pend->dev)->mutex_cow);
+	if (ret<0 || pend->ret<0)
+		pend->ret = -1;
+	else
+		pend->ret+=ret;
+	if (--pend->blocks == 0)
+		done = 1;
+	pthread_mutex_unlock(&D(pend->dev)->mutex_cow);
+
+	if (!done)
+		return;
+
+	pend->cb(pend->cookie, pend->ret);
+	free(pend);
 }
 
 static void slave_pread(struct device* dev, void* data, size_t count, off64_t offset, dev_callback_t cb, void* cookie) {
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
-	int copied = test(dev, offset);
-	pthread_mutex_unlock(&D(dev)->mutex_cow);
+	struct pending* pend = NULL;
+	struct device* target;
+	int ccount, bcount = 0;
 
-	if (copied) {
-		D(dev)->s_ssr++;
-		device_pread(D(dev)->snapshot, data, count, offset, cb, cookie);
-	} else {
-		D(dev)->s_str++;
-		device_pread(D(dev)->storage, data, count, offset, cb, cookie);
+	while(bcount<count) {
+		/* Gather a contigous chunk to the same destination */
+
+  		pthread_mutex_lock(&D(dev)->mutex_cow);
+		ccount = 0;
+		if (test(dev, offset+bcount)) {
+			while(bcount+ccount<count && test(dev, offset+bcount)) {
+				ccount+=BLKSIZE;
+				D(dev)->s_ssr++;
+			}
+
+			target = D(dev)->snapshot;
+		} else {
+			while(bcount+ccount<count && !test(dev, offset+bcount)) {
+				ccount+=BLKSIZE;
+				D(dev)->s_str++;
+			}
+
+			target = D(dev)->storage;
+		}
+
+		/* Read it all at once */
+
+		if (ccount == count) {
+			/* Fast path: no splitting */
+  			pthread_mutex_unlock(&D(dev)->mutex_cow);
+			device_pread(target, data, count, offset, cb, cookie);
+			return;
+		}
+		if (pend == NULL) {
+			pend = (struct pending*) malloc(sizeof(struct pending));
+			pend->dev = dev;
+			pend->data = data;
+			pend->offset = offset;
+			pend->blocks = 1;
+			pend->ret = 0;
+			pend->cb = cb;
+			pend->cookie = cookie;
+		}
+		pend->blocks++;
+  		pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+		device_pread(target, data, ccount, offset+bcount, slave_end_read_cb, pend);
+
+		bcount += ccount;
 	}
+	if (pend!=NULL)
+		slave_end_read_cb(pend, 0);
 }
 
 struct device_ops slave_device_ops = {
@@ -492,6 +548,7 @@ int holey_open(struct device* dev, struct device* storage, struct device* snapsh
 	memset(dev->data, 0, sizeof(struct holeycow_data));
 	pthread_mutex_init(&D(dev)->mutex_cow, NULL);
 	pthread_cond_init(&D(dev)->init, NULL);
+	pthread_mutex_init(&D(dev)->mutex_busy, NULL);
 	D(dev)->storage = storage;
 	D(dev)->snapshot = snapshot;
 	D(dev)->ctrl = fdopen(ctrlfd, "r+");

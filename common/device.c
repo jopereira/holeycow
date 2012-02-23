@@ -144,7 +144,7 @@ static void pwrite_cb(void* cookie, int ret) {
 
 	if (ret==BLKSIZE) {
 		memcpy(inc->tmp+(inc->offset-inc->cursor), inc->buffer, inc->bcount);
-		device_pwrite(inc->dev, inc->tmp, BLKSIZE, inc->cursor, cleanup_cb, inc);
+		device_pwrite(D(inc->dev)->impl, inc->tmp, BLKSIZE, inc->cursor, cleanup_cb, inc);
 	} else
 		cleanup_cb(inc, -1);
 }

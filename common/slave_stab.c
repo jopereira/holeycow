@@ -43,7 +43,7 @@ static int st, sn;		/* sender tail and size */
 static int rt, rn;		/* receiver tail and size */
 
 static pthread_mutex_t mux;
-static pthread_cond_t notempty, ready;
+static pthread_cond_t notempty, notfull, ready;
 
 static int sfd=-1, sock=-1;
 
@@ -101,6 +101,8 @@ static void* sender_thread(void* p) {
 		st=(st+size)%max;
 		sn-=size;
 
+		pthread_cond_signal(&notfull);
+
 		pthread_mutex_unlock(&mux);
 
 		if (write(sock, &size, sizeof(size))!=sizeof(size)) {
@@ -124,11 +126,16 @@ static void receiver_thread_loop() {
 
 	while(1) {
 
-		int size=max-sn;
-		if (h+size>max)
-			size=max-h;
+		int size=0;
+		
+		while(size==0) {
+			size=max-sn;
+			if (h+size>max)
+				size=max-h;
 
-		assert(size>0);
+			if (size==0)
+				pthread_cond_wait(&notfull, &mux);
+		}
 
 		pthread_mutex_unlock(&mux);
 
@@ -201,6 +208,7 @@ void slave_stab(int s, int sz, int npool, callback_t cb, void* c) {
 
 	pthread_mutex_init(&mux, NULL);
 	pthread_cond_init(&notempty, NULL);
+	pthread_cond_init(&notfull, NULL);
 	pthread_cond_init(&ready, NULL);
 
 	pthread_create(&receiver, NULL, receiver_thread, NULL);
