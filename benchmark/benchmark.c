@@ -32,7 +32,7 @@
 
 #include <common/holeycow.h>
 
-static int verify=0, maxthr=100, maxblk=1024, time;
+static int verify=0, maxthr=100, maxblk=1024, time, length=1, verbose=0;
 
 pthread_mutex_t mtx;
 int cnt;
@@ -40,20 +40,39 @@ struct timeval start;
 
 void* workload_thread(void* p) {
 	struct device* dev = (struct device*)p;
-	char bogus[BLKSIZE];
+	char bogus[BLKSIZE*length];
 	int i,j;
 	struct timeval now;
 	double elapsed;
 
 	for(i=0;;i++) {
 		for(j=0;j<10;j++) {
-			int id=(random()%maxblk)|(random()%maxblk);
-			device_pread_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
+			struct timeval before;
+			int id=(random()%(maxblk-length+1))|(random()%(maxblk-length+1));
+			if (verbose) {
+				gettimeofday(&before, NULL);
+				printf("begin read %d %d\n", id, length);
+			}
+			device_pread_sync(dev, bogus, BLKSIZE*length, id*BLKSIZE);
+			if (verbose) {
+				gettimeofday(&now, NULL);
+				elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
+				printf("end read %d %d %.1lf\n", id, length, elapsed);
+			}
 			if (verify && *(int*)bogus!=id) {
 				printf("expected %d got %d\n", id, *(int*)bogus);
 				exit(1);
 			}
-			device_pwrite_sync(dev, bogus, BLKSIZE, id*BLKSIZE);
+			if (verbose) {
+				gettimeofday(&before, NULL);
+				printf("begin write %d %d\n", id, length);
+			}
+			device_pwrite_sync(dev, bogus, BLKSIZE*length, id*BLKSIZE);
+			if (verbose) {
+				gettimeofday(&now, NULL);
+				elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
+				printf("end write %d %d %.1lf\n", id, length, elapsed);
+			}
 			usleep(time);
 		}
 		pthread_mutex_lock(&mtx);
@@ -95,10 +114,12 @@ void usage() {
 	fprintf(stderr, "\t-a -- use asynchronous I/O (default: no)\n");
 	fprintf(stderr, "\t-n -- use null backend (default: no)\n");
 	fprintf(stderr, "\t-i -- initialize storage (default: no)\n");
-	fprintf(stderr, "\t-v -- verify data read (default: no)\n");
+	fprintf(stderr, "\t-l -- request length in pages (default: 1)\n");
+	fprintf(stderr, "\t-f -- verify data read (default: no)\n");
 	fprintf(stderr, "\t-t threads -- workload threads (default: 100)\n");
 	fprintf(stderr, "\t-b blocks -- storage size bits (default: 10, i.e. 1024 blocks)\n");
 	fprintf(stderr, "\t-r rate -- blocks/second (default: 1000)\n");
+	fprintf(stderr, "\t-v -- verbose (default: no)\n");
 	exit(1);
 }
 
@@ -107,7 +128,7 @@ int main(int argc, char* argv[]) {
 	struct device storage, snapshot, cow, ba, *target;
 	struct sockaddr_in coord;
 
-	while((opt = getopt(argc, argv, "anip:t:b:vr:"))!=-1) {
+	while((opt = getopt(argc, argv, "anip:t:b:vr:l:f"))!=-1) {
 		switch(opt) {
 			case 'a':
 				aio = 1;
@@ -130,8 +151,14 @@ int main(int argc, char* argv[]) {
 			case 'r':
 				rate = atoi(optarg);
 				break;
-			case 'v':
+			case 'f':
 				verify = 1;
+				break;
+			case 'v':
+				verbose = 1;
+				break;
+			case 'l':
+				length = atoi(optarg);
 				break;
 			default:
 				usage();
