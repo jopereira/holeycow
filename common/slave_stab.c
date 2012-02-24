@@ -116,8 +116,6 @@ static void* sender_thread(void* p) {
 	
 		s_s_size+=size;
 		s_s_num++;
-
-		usleep(50000);
 	}
 }
 

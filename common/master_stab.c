@@ -159,8 +159,6 @@ static void sender_thread_loop(struct slave* me) {
 			return;
 		}
 
-		usleep(50000);
-
 		s_m_size+=size;
 		s_m_num++;
 
