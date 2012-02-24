@@ -136,6 +136,8 @@ static int holeycow_close(struct device* dev) {
 static void master_end_write_cb(void* cookie, int ret) {
 	struct pending* pend = (struct pending*) cookie; 
 
+	assert(ret>=0);
+
 	pthread_mutex_lock(&D(pend->dev)->mutex_cow);
 	if (--D(pend->dev)->pw == 0)
 		pthread_cond_broadcast(&D(pend->dev)->blocked);

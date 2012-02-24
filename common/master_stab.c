@@ -285,8 +285,20 @@ void del_slave(struct sockaddr_in* addr) {
 	d->dead=1;
 	d->next=NULL;
 
-	pthread_cond_broadcast(&notempty);
-	gc_slaves();
+
+	if (slaves==0) {
+		while(sn>0) {
+			/* Fake send */
+				sn--;
+			st=(st+1)%max;
+
+			/* Fake receive */
+			rn++;
+		}
+	} else
+		gc_slaves();
+
+	pthread_cond_broadcast(&ready);
 
 	pthread_mutex_unlock(&mux);
 
@@ -320,7 +332,7 @@ int add_block(block_t id, void* cookie) {
 
 		/* Fake receive */
 		rn++;
-		pthread_cond_signal(&ready);
+		pthread_cond_broadcast(&ready);
 	}
 
 	pthread_mutex_unlock(&mux);
