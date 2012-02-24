@@ -83,12 +83,16 @@ void* workload_thread(void* p) {
 				printf("end write %d %d %.1lf\n", id, length, elapsed);
 			}
 			usleep(time);
+			pthread_mutex_lock(&mtx);
+			cnt+=1;
+			pthread_mutex_unlock(&mtx);
 		}
 		pthread_mutex_lock(&mtx);
-		cnt+=10;
 		gettimeofday(&now, NULL);
 		elapsed=now.tv_sec-start.tv_sec+(now.tv_usec-start.tv_usec)/(double)1e6;
 		printf("\r%.2lf pages/s",cnt*length/elapsed);
+		cnt=0;
+		start=now;
 		pthread_mutex_unlock(&mtx);
 		fflush(stdout);
 	}
