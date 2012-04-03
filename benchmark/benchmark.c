@@ -32,7 +32,8 @@
 
 #include <common/holeycow.h>
 
-static int verify=0, maxthr=100, maxblk=1024, time, length=1, verbose=0, align=1;
+static int verify=0, maxthr=100, time, length=1, verbose=0, align=1;
+static uint64_t maxblk=1024;
 
 pthread_mutex_t mtx;
 int cnt;
@@ -205,7 +206,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	if (!null && init) {
-		printf("Initializing storage: %d blocks of %d bytes\n", maxblk, BLKSIZE);
+		printf("Initializing storage: %ld blocks of %d bytes\n", maxblk, BLKSIZE);
 		workload_init(&storage);
 	} else {
 		struct stat sbuf;
@@ -214,7 +215,7 @@ int main(int argc, char* argv[]) {
 			exit(1);
 		}
 		maxblk = sbuf.st_size/BLKSIZE;
-		printf("Opened: %d blocks of %d bytes.\n", maxblk, BLKSIZE);
+		printf("Opened: %ld blocks of %d bytes.\n", maxblk, BLKSIZE);
 	}
 
 	if (argc-optind==1) {
