@@ -32,12 +32,33 @@
 
 #include <common/holeycow.h>
 
-static int verify=0, maxthr=100, time, length=1, verbose=0, align=1;
+static int verify=0, maxthr=100, time, length=1, verbose=0, align=1, csv=0;
 static uint64_t maxblk=1024;
 
 pthread_mutex_t mtx;
 int cnt;
 struct timeval start;
+
+void* reporter_thread(void* p) {
+	struct timeval now, init;
+	init=start;
+	double time,elapsed;
+	while(1) {
+		sleep(1);
+		pthread_mutex_lock(&mtx);
+		gettimeofday(&now, NULL);
+		elapsed=now.tv_sec-init.tv_sec+(now.tv_usec-init.tv_usec)/(double)1e6;
+		elapsed=now.tv_sec-start.tv_sec+(now.tv_usec-start.tv_usec)/(double)1e6;
+		if (csv)
+			printf("%.2lf, %.2lf\n",time,cnt/(BLKSIZE*elapsed));
+		else
+			printf("\r%.2lf blocks/s",cnt/(BLKSIZE*elapsed));
+		cnt=0;
+		start=now;
+		pthread_mutex_unlock(&mtx);
+		fflush(stdout);
+	}
+}
 
 void* workload_thread(void* p) {
 	struct device* dev = (struct device*)p;
@@ -85,17 +106,9 @@ void* workload_thread(void* p) {
 			}
 			usleep(time);
 			pthread_mutex_lock(&mtx);
-			cnt+=1;
+			cnt+=count;
 			pthread_mutex_unlock(&mtx);
 		}
-		pthread_mutex_lock(&mtx);
-		gettimeofday(&now, NULL);
-		elapsed=now.tv_sec-start.tv_sec+(now.tv_usec-start.tv_usec)/(double)1e6;
-		printf("\r%.2lf pages/s",cnt*length/elapsed);
-		cnt=0;
-		start=now;
-		pthread_mutex_unlock(&mtx);
-		fflush(stdout);
 	}
 	free(bogus);
 }
@@ -110,12 +123,14 @@ void workload_init(struct device* dev) {
 void workload(struct device* dev) {
 	int i;
 	pthread_t load[maxthr];
+	pthread_t rep;
 
 	pthread_mutex_init(&mtx, NULL);
 	gettimeofday(&start, NULL);
 
 	for(i=0;i<maxthr;i++)
 		pthread_create(&load[i], NULL, workload_thread, dev);
+	pthread_create(&rep, NULL, reporter_thread, NULL);
 	for(i=0;i<maxthr;i++)
 		pthread_join(load[i], NULL);
 }
@@ -135,6 +150,7 @@ void usage() {
 	fprintf(stderr, "\t-b blocks -- storage size (default: 1024 blocks)\n");
 	fprintf(stderr, "\t-u -- unaligned blocks (default: no)\n");
 	fprintf(stderr, "\t-r rate -- blocks/second (default: 1000)\n");
+	fprintf(stderr, "\t-c -- CSV output (default: no)\n");
 	fprintf(stderr, "\t-v -- verbose (default: no)\n");
 	exit(1);
 }
@@ -144,7 +160,7 @@ int main(int argc, char* argv[]) {
 	struct device storage, snapshot, cow, ba, *target;
 	struct sockaddr_in coord;
 
-	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fu"))!=-1) {
+	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fuc"))!=-1) {
 		switch(opt) {
 			case 'a':
 				aio = 1;
@@ -179,6 +195,9 @@ int main(int argc, char* argv[]) {
 			case 'l':
 				length = atoi(optarg);
 				break;
+			case 'c':
+				csv = 1;
+				break;
 			default:
 				usage();
 		}
@@ -199,7 +218,8 @@ int main(int argc, char* argv[]) {
 		nullbe_open(&storage);
 	} else if (aio) {
 		printf("Disk storage (AIO backend).\n");
-		aiobe_open(&storage, argv[optind], O_RDWR|O_DIRECT, 0);
+		aiobe_open(&storage, argv[optind], O_RDWR|O_SYNC|O_DIRECT, 0);
+		//aiobe_open(&storage, argv[optind], O_RDWR, 0);
 	} else {
 		printf("Disk storage (synchronous backend).\n");
 		posixbe_open(&storage, argv[optind], O_RDWR, 0);
