@@ -1,6 +1,6 @@
 
 CFLAGS = -g -I../
-LD_FLAGS = -L.. -lholeycow -lpthread -lrt
+LD_FLAGS = -L.. -lholeycow -lpthread -laio
 
 OBJS = benchmark.o
 
