@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <malloc.h>
 #include <pthread.h>
 
 #include "holeycow.h"
@@ -86,9 +87,6 @@ int device_pread_sync(struct device* dev, void* buf, size_t size, off64_t offset
  * Block align
  */
 
-/* memory alignement for DIRECT I/O */
-#define DALIGN 512
-
 struct blockalign_data {
 	struct device* impl;
 };
@@ -104,13 +102,13 @@ struct fragmented {
 };
 
 struct incomplete {
+	char tmp[BLKSIZE];
 	struct fragmented* frag;
 	struct device* dev;
 
 	void* buffer;
 	uint64_t offset, cursor;
 	int bcount;
-	char tmp[];
 };
 
 static void frag_cb(void* cookie, int ret) {
@@ -146,9 +144,8 @@ static void pwrite_cb(void* cookie, int ret) {
 	struct incomplete* inc = (struct incomplete*) cookie;
 
 	if (ret==BLKSIZE) {
-		char* ptr = inc->tmp+(DALIGN-((long)inc->tmp)%DALIGN);
-		memcpy(ptr+(inc->offset-inc->cursor), inc->buffer, inc->bcount);
-		device_pwrite(D(inc->dev)->impl, ptr, BLKSIZE, inc->cursor, cleanup_cb, inc);
+		memcpy(inc->tmp+(inc->offset-inc->cursor), inc->buffer, inc->bcount);
+		device_pwrite(D(inc->dev)->impl, inc->tmp, BLKSIZE, inc->cursor, cleanup_cb, inc);
 	} else
 		cleanup_cb(inc, -1);
 }
@@ -157,8 +154,7 @@ static void pread_cb(void* cookie, int ret) {
 	struct incomplete* inc = (struct incomplete*) cookie;
 
 	if (ret==BLKSIZE) {
-		char* ptr = inc->tmp+(DALIGN-((long)inc->tmp)%DALIGN);
-		memcpy(inc->buffer, ptr+(inc->offset-inc->cursor), inc->bcount);
+		memcpy(inc->buffer, inc->tmp+(inc->offset-inc->cursor), inc->bcount);
 		frag_cb(inc->frag, inc->bcount);
 	} else
 		frag_cb(inc->frag, -1);
@@ -194,7 +190,7 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off6
 		if (cursor != offset || count<BLKSIZE) {
 			bcount = offset+count > cursor+BLKSIZE ? cursor+BLKSIZE-offset : count;
 
-			struct incomplete* inc = (struct incomplete*) malloc(sizeof(struct incomplete)+BLKSIZE+DALIGN);
+			struct incomplete* inc = (struct incomplete*) memalign(512, sizeof(struct incomplete));
 			memset(inc, 0 , sizeof(*inc));
 
 			inc->frag = frag;
@@ -204,8 +200,7 @@ static void blockalign_pwrite(struct device* dev, void* data, size_t count, off6
 			inc->offset = offset;
 			inc->buffer = data;
 
-			char* ptr = inc->tmp+(DALIGN-((long)inc->tmp)%DALIGN);
-			device_pread(D(dev)->impl, ptr, BLKSIZE, cursor, pwrite_cb, inc);
+			device_pread(D(dev)->impl, inc->tmp, BLKSIZE, cursor, pwrite_cb, inc);
 		} else {
 			bcount = count%BLKSIZE;
 
@@ -248,7 +243,7 @@ static void blockalign_pread(struct device* dev, void* data, size_t count, off64
 		if (cursor != offset || count<BLKSIZE) {
 			bcount = offset+count > cursor+BLKSIZE ? cursor+BLKSIZE-offset : count;
 
-			struct incomplete* inc = (struct incomplete*) malloc(sizeof(struct incomplete)+BLKSIZE+DALIGN);
+			struct incomplete* inc = (struct incomplete*) memalign(512, sizeof(struct incomplete));
 			memset(inc, 0 , sizeof(*inc));
 
 			inc->frag = frag;
@@ -257,8 +252,7 @@ static void blockalign_pread(struct device* dev, void* data, size_t count, off64
 			inc->offset = offset;
 			inc->buffer = data;
 
-			char* ptr = inc->tmp+(DALIGN-((long)inc->tmp)%DALIGN);
-			device_pread(D(dev)->impl, ptr, BLKSIZE, cursor, pread_cb, inc);
+			device_pread(D(dev)->impl, inc->tmp, BLKSIZE, cursor, pread_cb, inc);
 		} else {
 			bcount = count%BLKSIZE;
 			device_pread(D(dev)->impl, data, bcount, cursor, frag_cb, frag);

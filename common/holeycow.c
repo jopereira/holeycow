@@ -33,6 +33,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <malloc.h>
 
 #include "holeycow.h"
 #include "stability.h"
@@ -227,7 +228,7 @@ static struct device_ops master_device_ops = {
 
 static void slave_cow_cb(block_t id, void* cookie) {
 	struct device* dev = (struct device*) cookie;
-	char buffer[BLKSIZE];
+	char* buffer;
 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	if (test(dev, id)) {
@@ -235,9 +236,13 @@ static void slave_cow_cb(block_t id, void* cookie) {
 		return;
 	}
 
+	buffer = memalign(512, BLKSIZE);
+
 	D(dev)->s_stfr++;
 	device_pread_sync(D(dev)->storage, buffer, BLKSIZE, id);
 	device_pwrite_sync(D(dev)->snapshot, buffer, BLKSIZE, id);
+
+	free(buffer);
 
 	test_and_set(dev, id);
 
@@ -370,13 +375,15 @@ struct device_ops init_device_ops = {
 struct recovery_data {
 	struct device* dev;
 	off64_t offset;
-	char buffer[BLKSIZE];
+	char* buffer;
 };
 
 static void recover_write_cb(void* cookie, int ret) {
+	struct recovery_data* data = (struct recovery_data*) cookie;
 	assert(ret==BLKSIZE);
 
-	free(cookie);
+	free(data->buffer);
+	free(data);
 }
 
 static void recover_read_cb(void* cookie, int ret) {
@@ -442,6 +449,7 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 			struct recovery_data* data=(struct recovery_data*)malloc(sizeof(struct recovery_data));
 			data->dev=dev;
 			data->offset=i;
+			data->buffer=memalign(512, BLKSIZE);
 			device_pread(D(dev)->snapshot, data->buffer, BLKSIZE, data->offset, recover_read_cb, data);
 		}
 	}
