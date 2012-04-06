@@ -47,7 +47,7 @@ void* reporter_thread(void* p) {
 		sleep(1);
 		pthread_mutex_lock(&mtx);
 		gettimeofday(&now, NULL);
-		elapsed=now.tv_sec-init.tv_sec+(now.tv_usec-init.tv_usec)/(double)1e6;
+		time=now.tv_sec-init.tv_sec+(now.tv_usec-init.tv_usec)/(double)1e6;
 		elapsed=now.tv_sec-start.tv_sec+(now.tv_usec-start.tv_usec)/(double)1e6;
 		if (csv)
 			printf("%.2lf, %.2lf\n",time,cnt/(BLKSIZE*elapsed));
@@ -62,12 +62,13 @@ void* reporter_thread(void* p) {
 
 void* workload_thread(void* p) {
 	struct device* dev = (struct device*)p;
-	char* bogus;
+	char *buf, *bogus;
 	int i,j;
 	struct timeval now;
 	double elapsed;
 
-	bogus=malloc(BLKSIZE*length);
+	buf=malloc(BLKSIZE*length+512);
+	bogus=buf+(512-((long)buf)%512);
 	for(i=0;;i++) {
 		for(j=0;j<10;j++) {
 			struct timeval before;
