@@ -26,6 +26,7 @@
 #include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <fcntl.h>
 #include <assert.h>
@@ -40,6 +41,8 @@
 
 #define STAB_QUEUE	1000
 
+#define MAXLINE 200
+
 struct holeycow_data {
 	/* common */
 	pthread_mutex_t mutex_cow; 
@@ -49,7 +52,10 @@ struct holeycow_data {
 	struct device* storage;
 	int *bitmap;
 	uint64_t max_size;
-	FILE* ctrl;
+	int ctrlfd;
+	char inbuf[MAXLINE], outbuf[MAXLINE];
+	int incnt;
+	char* ptr;
 
 	/* master variables */
 	pthread_cond_t blocked;
@@ -385,6 +391,32 @@ static void recover_read_cb(void* cookie, int ret) {
  * CONTROLLER Functions
  */
 
+static int ctrl_read(struct device* dev, char* buf) {
+	while(1) {
+		while(D(dev)->incnt) {
+			D(dev)->incnt--;
+			*buf = *D(dev)->ptr++;
+			if (*buf == '\n') {
+				*buf = 0;
+				return 1;
+			}
+			buf++;
+		}
+		D(dev)->ptr = D(dev)->inbuf;
+		D(dev)->incnt=read(D(dev)->ctrlfd,D(dev)->inbuf,MAXLINE);
+		if (D(dev)->incnt<=0)
+			return 0;
+	}
+}
+
+static void ctrl_reply(struct device* dev, char* fmt, ...) {
+	va_list va;
+	va_start(va, fmt);
+	int n=vsprintf(D(dev)->outbuf, fmt, va);
+	va_end(va);
+	write(D(dev)->ctrlfd, D(dev)->outbuf, n);
+}
+
 static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slave) {
 	int i;
 
@@ -441,8 +473,7 @@ static int master_add_slave(struct device* dev, struct sockaddr_in* slave) {
 		pthread_cond_wait(&D(dev)->blocked, &D(dev)->mutex_cow);
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
-	fprintf(D(dev)->ctrl, "acknowledge %s %d\n", inet_ntoa(slave->sin_addr), ntohs(slave->sin_port));
-	fflush(D(dev)->ctrl);
+	ctrl_reply(dev, "acknowledge %s %d\n", inet_ntoa(slave->sin_addr), ntohs(slave->sin_port));
 
 	add_slave(slave);
 	memset(D(dev)->bitmap, 0, (D(dev)->max_size/BLKSIZE)/8+sizeof(int));
@@ -467,8 +498,7 @@ static void pre_init(struct device* dev) {
 	memset(&slave, 0, len);
 	getsockname(D(dev)->sfd, (struct sockaddr *)&slave, &len);
 
-	fprintf(D(dev)->ctrl, "booted %s %d\n", inet_ntoa(slave.sin_addr), ntohs(slave.sin_port));
-	fflush(D(dev)->ctrl);
+	ctrl_reply(dev, "booted %s %d\n", inet_ntoa(slave.sin_addr), ntohs(slave.sin_port));
 }
 
 static void slave_init(struct device* dev) {
@@ -484,8 +514,8 @@ static void slave_init(struct device* dev) {
 
 void stats(struct device* dev) {
 	extern int s_m_num, s_m_size, s_s_num, s_s_size;
-	fprintf(D(dev)->ctrl, "stats %d %d %d %d %d %d %d %d\n", D(dev)->s_str, D(dev)->s_stw, D(dev)->s_stdw, D(dev)->s_ssr, D(dev)->s_ssw, D(dev)->s_stfr, (s_m_num+s_s_num), (s_m_size+s_s_size));
-	fflush(D(dev)->ctrl);
+	ctrl_reply(dev, "stats %d %d %d %d %d %d %d %d\n", D(dev)->s_str, D(dev)->s_stw, D(dev)->s_stdw, D(dev)->s_ssr, D(dev)->s_ssw, D(dev)->s_stfr, (s_m_num+s_s_num), (s_m_size+s_s_size));
+	//fflush(D(dev)->ctrl);
 }
 
 static void* ctrl_thread(void* arg) {
@@ -496,9 +526,9 @@ static void* ctrl_thread(void* arg) {
 
 	pre_init(dev);
 
-	while(fgets(buffer, 100, D(dev)->ctrl)!=NULL) {
+	while(ctrl_read(dev, buffer)) {
 		if (strncmp(buffer, "stats", 5))
-			fprintf(stderr, "coord: %s", buffer);
+			fprintf(stderr, "coord: %s\n", buffer);
 
 		i=0;
 		cmd[i]=strtok(buffer, " \t\n");
@@ -556,7 +586,7 @@ int holey_open(struct device* dev, struct device* storage, struct device* snapsh
 	pthread_mutex_init(&D(dev)->mutex_busy, NULL);
 	D(dev)->storage = storage;
 	D(dev)->snapshot = snapshot;
-	D(dev)->ctrl = fdopen(ctrlfd, "r+");
+	D(dev)->ctrlfd = ctrlfd;
 	D(dev)->max_size = max_size;
 
 	/* create the bitmap */
