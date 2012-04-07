@@ -261,7 +261,7 @@ int main(int argc, char* argv[]) {
 		if (null)
 			nullbe_open(&snapshot);
 		else if (aio)
-			aiobe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
+			aiobe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT|O_DIRECT, 0644);
 		else
 			posixbe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
 		holey_open(&cow, &storage, &snapshot, maxblk*BLKSIZE, fd);
