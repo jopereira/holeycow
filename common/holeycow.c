@@ -382,6 +382,11 @@ static void recover_write_cb(void* cookie, int ret) {
 	struct recovery_data* data = (struct recovery_data*) cookie;
 	assert(ret==BLKSIZE);
 
+  	pthread_mutex_lock(&D(data->dev)->mutex_cow);
+	if (--D(data->dev)->pw==0)
+		pthread_cond_broadcast(&D(data->dev)->blocked);
+  	pthread_mutex_unlock(&D(data->dev)->mutex_cow);
+
 	free(data->buffer);
 	free(data);
 }
@@ -450,8 +455,17 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 			data->dev=dev;
 			data->offset=i;
 			data->buffer=memalign(512, BLKSIZE);
+
+  			pthread_mutex_lock(&D(dev)->mutex_cow);
+			D(dev)->pw++;
+  			pthread_mutex_unlock(&D(dev)->mutex_cow);
+
 			device_pread(D(dev)->snapshot, data->buffer, BLKSIZE, data->offset, recover_read_cb, data);
 		}
+  		pthread_mutex_lock(&D(dev)->mutex_cow);
+		while(D(dev)->pw>50)
+			pthread_cond_wait(&D(dev)->blocked, &D(dev)->mutex_cow);
+  		pthread_mutex_unlock(&D(dev)->mutex_cow);
 	}
 
 	free(oldbitmap);
