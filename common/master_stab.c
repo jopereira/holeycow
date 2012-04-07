@@ -250,7 +250,7 @@ void add_slave(struct sockaddr_in* addr) {
 
 	pthread_mutex_lock(&mux);
 
-	assert(rn == 0 && sn == 0 && fn == 0);
+	assert(rn == 0 && sn == 0 && wn == 0);
 
 	p = (struct slave*) malloc(sizeof(struct slave));
 	memset(p, 0, sizeof(*p));
