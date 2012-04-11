@@ -212,22 +212,21 @@ int main(int argc, char* argv[]) {
 
 	time = (int)(1000000/(((double)rate)/maxthr));
 
-	printf("Target IO rate: %.2lf blocks/second (%d threads)\n", ((double)1000000)*maxthr*length/time, maxthr);
+	fprintf(stderr, "Target IO rate: %.2lf blocks/second (%d threads)\n", ((double)1000000)*maxthr*length/time, maxthr);
 
 	if (null) {
-		printf("Null storage.\n");
+		fprintf(stderr, "Null storage.\n");
 		nullbe_open(&storage);
 	} else if (aio) {
-		printf("Disk storage (AIO backend).\n");
+		fprintf(stderr, "Disk storage (AIO backend).\n");
 		aiobe_open(&storage, argv[optind], O_RDWR|O_SYNC|O_DIRECT, 0);
-		//aiobe_open(&storage, argv[optind], O_RDWR, 0);
 	} else {
-		printf("Disk storage (synchronous backend).\n");
+		fprintf(stderr, "Disk storage (synchronous backend).\n");
 		posixbe_open(&storage, argv[optind], O_RDWR, 0);
 	}
 
 	if (!null && init) {
-		printf("Initializing storage: %ld blocks of %d bytes\n", maxblk, BLKSIZE);
+		fprintf(stderr, "Initializing storage: %ld blocks of %d bytes\n", maxblk, BLKSIZE);
 		workload_init(&storage);
 	} else {
 		struct stat sbuf;
@@ -236,15 +235,15 @@ int main(int argc, char* argv[]) {
 			exit(1);
 		}
 		maxblk = sbuf.st_size/BLKSIZE;
-		printf("Opened: %ld blocks of %d bytes.\n", maxblk, BLKSIZE);
+		fprintf(stderr, "Opened: %ld blocks of %d bytes.\n", maxblk, BLKSIZE);
 	}
 
 	if (argc-optind==1) {
 		/* Standalone mode */
-		printf("Running in Standalone mode.\n");
+		fprintf(stderr, "Running in Standalone mode.\n");
 		target = &storage;
 	} else {
-		printf("Running in HoleyCoW mode (coordinator port = %d).\n", port);
+		fprintf(stderr, "Running in HoleyCoW mode (coordinator port = %d).\n", port);
 		/* HoleyCoW mode */
 		fd=socket(PF_INET, SOCK_STREAM, 0);
 
@@ -261,7 +260,7 @@ int main(int argc, char* argv[]) {
 		if (null)
 			nullbe_open(&snapshot);
 		else if (aio)
-			aiobe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT|O_DIRECT, 0644);
+			aiobe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
 		else
 			posixbe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
 		holey_open(&cow, &storage, &snapshot, maxblk*BLKSIZE, fd);
