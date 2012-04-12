@@ -117,7 +117,7 @@ int aiobe_open(struct device* dev, char* path, int flags, mode_t mode) {
 
 	D(dev)->fd = ret;
 
-	if (io_queue_init(100, &D(dev)->ctx)) {
+	if (io_queue_init(1000, &D(dev)->ctx)) {
 		close(D(dev)->fd);
 		free(dev->data);
 		return -1;

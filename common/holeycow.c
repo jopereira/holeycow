@@ -40,7 +40,7 @@
 
 #define D(dev) ((struct holeycow_data*)(dev)->data)
 
-#define STAB_QUEUE	1000
+#define STAB_QUEUE	4000
 
 #define MAXLINE 200
 
@@ -150,10 +150,8 @@ static inline void wait_transit(struct device* dev, uint64_t id) {
 	uint64_t idx=boff/(8*sizeof(int));
 	int mask=1<<(boff%(8*sizeof(int)));
 
-	while(D(dev)->transit[idx]&mask) {
-		printf("recoiso %d %x %x\n", idx, D(dev)->bitmap[idx], mask);
+	while(D(dev)->transit[idx]&mask)
 		pthread_cond_wait(&D(dev)->cond_transit, &D(dev)->mutex_cow);
-	}
 }
 
 static int holeycow_close(struct device* dev) {
@@ -590,7 +588,7 @@ static void pre_init(struct device* dev) {
 }
 
 static void slave_init(struct device* dev) {
-	slave_stab(D(dev)->sfd, STAB_QUEUE, 20, slave_cow_cb, dev);
+	slave_stab(D(dev)->sfd, STAB_QUEUE, 100, slave_cow_cb, dev);
 
 	pthread_mutex_lock(&D(dev)->mutex_cow);
 	dev->ops = &slave_device_ops;
