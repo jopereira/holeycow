@@ -51,7 +51,7 @@ struct holeycow_data {
 	int ready;
 
 	struct device* storage;
-	int *bitmap;
+	int *bitmap, *transit;
 	uint64_t max_size;
 	int ctrlfd;
 	char inbuf[MAXLINE], outbuf[MAXLINE];
@@ -65,7 +65,7 @@ struct holeycow_data {
 	/* slave variables */
 	int sfd;
 	struct device* snapshot;
-	pthread_mutex_t mutex_busy; 
+	pthread_cond_t cond_transit;
 
 	/* statistics */
 	/* storage: reads, writes, delayed writes */
@@ -120,6 +120,40 @@ static inline int rec_test(int* bitmap, uint64_t id) {
 
 	result=bitmap[idx]&mask;
 	return result;
+}
+
+static inline void start_transit(struct device* dev, uint64_t id) {
+		
+	uint64_t boff=(id&OFFMASK)>>FDBITS;
+	
+	uint64_t idx=boff/(8*sizeof(int));
+	int mask=1<<(boff%(8*sizeof(int))); 
+			
+	D(dev)->transit[idx]|=mask;
+}
+
+static inline void end_transit(struct device* dev, uint64_t id) {
+		
+	uint64_t boff=(id&OFFMASK)>>FDBITS;
+	
+	uint64_t idx=boff/(8*sizeof(int));
+	int mask=1<<(boff%(8*sizeof(int))); 
+			
+	D(dev)->transit[idx]&=~mask;
+	pthread_cond_broadcast(&D(dev)->cond_transit);
+}
+
+static inline void wait_transit(struct device* dev, uint64_t id) {
+	
+   	uint64_t boff=(id&OFFMASK)>>FDBITS;
+	
+	uint64_t idx=boff/(8*sizeof(int));
+	int mask=1<<(boff%(8*sizeof(int)));
+
+	while(D(dev)->transit[idx]&mask) {
+		printf("recoiso %d %x %x\n", idx, D(dev)->bitmap[idx], mask);
+		pthread_cond_wait(&D(dev)->cond_transit, &D(dev)->mutex_cow);
+	}
 }
 
 static int holeycow_close(struct device* dev) {
@@ -226,34 +260,65 @@ static struct device_ops master_device_ops = {
  * Slave Functions
  */
 
+struct delayed_cow {
+	char buffer[BLKSIZE];
+	struct device* dev;
+	block_t id;
+};
+
+static void slave_end_cow_cb(void* cookie, int ret) {
+	struct delayed_cow* cow = (struct delayed_cow*) cookie;
+
+	pthread_mutex_lock(&D(cow->dev)->mutex_cow);
+	end_transit(cow->dev, cow->id);
+	test_and_set(cow->dev, cow->id);
+	pthread_mutex_unlock(&D(cow->dev)->mutex_cow);
+
+	free(cow);
+}
+
 static void slave_cow_cb(block_t id, void* cookie) {
 	struct device* dev = (struct device*) cookie;
-	char* buffer;
 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	if (test(dev, id)) {
 		pthread_mutex_unlock(&D(dev)->mutex_cow);
 		return;
 	}
-
-	buffer = memalign(512, BLKSIZE);
-
 	D(dev)->s_stfr++;
-	device_pread_sync(D(dev)->storage, buffer, BLKSIZE, id);
-	device_pwrite_sync(D(dev)->snapshot, buffer, BLKSIZE, id);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
-	free(buffer);
+	struct delayed_cow* cow = (struct delayed_cow*) memalign(512, sizeof(struct delayed_cow));
+	device_pread_sync(D(dev)->storage, cow->buffer, BLKSIZE, id);
+	
+  	pthread_mutex_lock(&D(dev)->mutex_cow);
+	/* There can be concurrent CoWs to the same block. */
+	wait_transit(dev, id);
+	if (test(dev, id)) {
+		free(cow);
+		pthread_mutex_unlock(&D(dev)->mutex_cow);
+		return;
+	}
+	/* Not in transit and not CoWed. Do it now. */
+	cow->id = id;
+	cow->dev = dev;
+	start_transit(dev, id);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
+	
+	device_pwrite(D(dev)->snapshot, cow->buffer, BLKSIZE, id, slave_end_cow_cb, cow);
 
-	test_and_set(dev, id);
-
-	pthread_mutex_unlock(&D(dev)->mutex_cow);
+	/* Returning acks the writer copy, as we already hold a copy in memory. */
 }
+
 
 static void slave_pwrite(struct device* dev, void* data, size_t count,  off64_t offset, dev_callback_t cb, void* cookie) {
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	int bcount;
 	for(bcount = 0;bcount<count;bcount+=BLKSIZE) {
-		test_and_set(dev, offset+bcount);
+		/* As there are no concurrent writes to the same block, it can only
+		 * be in transit if previously unmarked. */
+		if (!test_and_set(dev, offset+bcount))
+			wait_transit(dev, offset+bcount);
 		D(dev)->s_ssw++;
 	}
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
@@ -444,6 +509,7 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 
 	int* oldbitmap=D(dev)->bitmap;
 	D(dev)->bitmap=(int*)calloc((D(dev)->max_size/BLKSIZE)/8+sizeof(int), 1);
+	D(dev)->transit=(int*)calloc((D(dev)->max_size/BLKSIZE)/8+sizeof(int), 1);
 
 	master_stab(STAB_QUEUE, master_delayed_write_cb, 20);
 	for(i=0;i<nslaves;i++)
@@ -605,7 +671,7 @@ int holey_open(struct device* dev, struct device* storage, struct device* snapsh
 	memset(dev->data, 0, sizeof(struct holeycow_data));
 	pthread_mutex_init(&D(dev)->mutex_cow, NULL);
 	pthread_cond_init(&D(dev)->init, NULL);
-	pthread_mutex_init(&D(dev)->mutex_busy, NULL);
+	pthread_cond_init(&D(dev)->cond_transit, NULL);
 	D(dev)->storage = storage;
 	D(dev)->snapshot = snapshot;
 	D(dev)->ctrlfd = ctrlfd;
@@ -613,6 +679,7 @@ int holey_open(struct device* dev, struct device* storage, struct device* snapsh
 
 	/* create the bitmap */
 	D(dev)->bitmap=(int*)calloc((max_size/BLKSIZE)/8+sizeof(int), 1);
+	D(dev)->transit=(int*)calloc((max_size/BLKSIZE)/8+sizeof(int), 1);
 
 	pthread_create(&thread, NULL, ctrl_thread, dev);
 	pthread_detach(thread);
