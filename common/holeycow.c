@@ -64,6 +64,7 @@ struct holeycow_data {
 
 	/* slave variables */
 	int sfd;
+	int pc;
 	struct device* snapshot;
 	pthread_cond_t cond_transit;
 
@@ -269,7 +270,8 @@ static void slave_end_cow_cb(void* cookie, int ret) {
 
 	pthread_mutex_lock(&D(cow->dev)->mutex_cow);
 	end_transit(cow->dev, cow->id);
-	test_and_set(cow->dev, cow->id);
+	if (!test_and_set(cow->dev, cow->id))
+		D(cow->dev)->pc++;
 	pthread_mutex_unlock(&D(cow->dev)->mutex_cow);
 
 	free(cow);
@@ -315,8 +317,10 @@ static void slave_pwrite(struct device* dev, void* data, size_t count,  off64_t 
 	for(bcount = 0;bcount<count;bcount+=BLKSIZE) {
 		/* As there are no concurrent writes to the same block, it can only
 		 * be in transit if previously unmarked. */
-		if (!test_and_set(dev, offset+bcount))
+		if (!test_and_set(dev, offset+bcount)) {
+			D(dev)->pc++;
 			wait_transit(dev, offset+bcount);
+		}
 		D(dev)->s_ssw++;
 	}
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
@@ -446,8 +450,8 @@ static void recover_write_cb(void* cookie, int ret) {
 	assert(ret==BLKSIZE);
 
   	pthread_mutex_lock(&D(data->dev)->mutex_cow);
-	if (--D(data->dev)->pw==0)
-		pthread_cond_broadcast(&D(data->dev)->blocked);
+	D(data->dev)->pc--;
+	pthread_cond_broadcast(&D(data->dev)->cond_transit);
   	pthread_mutex_unlock(&D(data->dev)->mutex_cow);
 
 	free(data->buffer);
@@ -513,6 +517,9 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 	for(i=0;i<nslaves;i++)
 		add_slave(slave+i);
 
+	int tot = D(dev)->pc;
+	int rem = D(dev)->pc;
+
 	for(i=0;i<D(dev)->max_size;i+=BLKSIZE) {
 		if (rec_test(oldbitmap, i)) {
 			struct recovery_data* data=(struct recovery_data*)malloc(sizeof(struct recovery_data));
@@ -520,24 +527,23 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 			data->offset=i;
 			data->buffer=memalign(512, BLKSIZE);
 
-  			pthread_mutex_lock(&D(dev)->mutex_cow);
-			D(dev)->pw++;
-  			pthread_mutex_unlock(&D(dev)->mutex_cow);
+			rem--;
 
 			device_pread(D(dev)->snapshot, data->buffer, BLKSIZE, data->offset, recover_read_cb, data);
 		}
   		pthread_mutex_lock(&D(dev)->mutex_cow);
-		while(D(dev)->pw>50)
-			pthread_cond_wait(&D(dev)->blocked, &D(dev)->mutex_cow);
+		while(D(dev)->pc-rem>=200)
+			pthread_cond_wait(&D(dev)->cond_transit, &D(dev)->mutex_cow);
   		pthread_mutex_unlock(&D(dev)->mutex_cow);
 	}
+ 	pthread_mutex_lock(&D(dev)->mutex_cow);
+	while(D(dev)->pc>0)
+		pthread_cond_wait(&D(dev)->cond_transit, &D(dev)->mutex_cow);
+
+	assert(D(dev)->pw == 0);
+  	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
 	free(oldbitmap);
-
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
-
-	while(D(dev)->pw>0)
-		pthread_cond_wait(&D(dev)->blocked, &D(dev)->mutex_cow);
 
 	dev->ops = &master_device_ops;
 	D(dev)->ready = 1;
