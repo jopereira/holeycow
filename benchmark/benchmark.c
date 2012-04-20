@@ -36,7 +36,8 @@ static int verify=0, maxthr=100, time, length=1, verbose=0, align=1, csv=0, ops=
 static uint64_t maxblk=1024;
 
 pthread_mutex_t mtx;
-int cnt;
+int cnt,iocnt;
+double total;
 struct timeval start;
 
 void* reporter_thread(void* p) {
@@ -50,10 +51,12 @@ void* reporter_thread(void* p) {
 		delta=now.tv_sec-init.tv_sec+(now.tv_usec-init.tv_usec)/(double)1e6;
 		elapsed=now.tv_sec-start.tv_sec+(now.tv_usec-start.tv_usec)/(double)1e6;
 		if (csv)
-			printf("%.2lf, %.2lf\n",delta,cnt/(BLKSIZE*elapsed));
+			printf("%.2lf, %.2lf, %.2lf, %.2lf\n",delta,cnt/(BLKSIZE*elapsed), iocnt/elapsed, total/iocnt);
 		else
-			printf("\r%.2lf blocks/s",cnt/(BLKSIZE*elapsed));
+			printf("\r%.2lf blocks/s, %.2lf IOPS, latency %.2lf us",cnt/(BLKSIZE*elapsed), iocnt/elapsed, total/iocnt);
 		cnt=0;
+		iocnt=0;
+		total=0;
 		start=now;
 		pthread_mutex_unlock(&mtx);
 		fflush(stdout);
@@ -81,38 +84,33 @@ void* workload_thread(void* p) {
 				offset+=noise;
 				count-=noise*2;
 			}
+			gettimeofday(&before, NULL);
 			if (ops&1) {
-				if (verbose) {
+				if (verbose)
 					printf("begin read %d %d %d\n", id, length, noise);
-					gettimeofday(&before, NULL);
-				}
 				device_pread_sync(dev, bogus, count, offset);
-				if (verbose) {
-					gettimeofday(&now, NULL);
-					elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
-					printf("end read %d %d %.1lf\n", id, length, elapsed);
-				}
+				if (verbose)
+					printf("end read %d %d %.1lf\n", id, length);
 				if (verify && *(int*)bogus!=id) {
 					printf("expected %d got %d\n", id, *(int*)bogus);
 					exit(1);
 				}
 			}
 			if (ops&2) {
-				if (verbose) {
-					gettimeofday(&before, NULL);
+				if (verbose)
 					printf("begin write %d %d %d\n", id, length, noise);
-				}
 				device_pwrite_sync(dev, bogus, count, offset);
-				if (verbose) {
-					gettimeofday(&now, NULL);
-					elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
-					printf("end write %d %d %.1lf\n", id, length, elapsed);
-				}
+				if (verbose)
+					printf("end write %d %d %.1lf\n", id, length);
 			}
+			gettimeofday(&now, NULL);
+			elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
 			if (time!=0)
 				usleep(time);
 			pthread_mutex_lock(&mtx);
 			cnt+=count;
+			iocnt++;
+			total+=elapsed;
 			pthread_mutex_unlock(&mtx);
 		}
 	}
