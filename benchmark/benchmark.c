@@ -32,7 +32,7 @@
 
 #include <common/holeycow.h>
 
-static int verify=0, maxthr=100, time, length=1, verbose=0, align=1, csv=0;
+static int verify=0, maxthr=100, time, length=1, verbose=0, align=1, csv=0, ops=3;
 static uint64_t maxblk=1024;
 
 pthread_mutex_t mtx;
@@ -42,15 +42,15 @@ struct timeval start;
 void* reporter_thread(void* p) {
 	struct timeval now, init;
 	init=start;
-	double time,elapsed;
+	double delta,elapsed;
 	while(1) {
 		sleep(1);
 		pthread_mutex_lock(&mtx);
 		gettimeofday(&now, NULL);
-		time=now.tv_sec-init.tv_sec+(now.tv_usec-init.tv_usec)/(double)1e6;
+		delta=now.tv_sec-init.tv_sec+(now.tv_usec-init.tv_usec)/(double)1e6;
 		elapsed=now.tv_sec-start.tv_sec+(now.tv_usec-start.tv_usec)/(double)1e6;
 		if (csv)
-			printf("%.2lf, %.2lf\n",time,cnt/(BLKSIZE*elapsed));
+			printf("%.2lf, %.2lf\n",delta,cnt/(BLKSIZE*elapsed));
 		else
 			printf("\r%.2lf blocks/s",cnt/(BLKSIZE*elapsed));
 		cnt=0;
@@ -81,31 +81,36 @@ void* workload_thread(void* p) {
 				offset+=noise;
 				count-=noise*2;
 			}
-			if (verbose) {
-				printf("begin read %d %d %d\n", id, length, noise);
-				gettimeofday(&before, NULL);
+			if (ops&1) {
+				if (verbose) {
+					printf("begin read %d %d %d\n", id, length, noise);
+					gettimeofday(&before, NULL);
+				}
+				device_pread_sync(dev, bogus, count, offset);
+				if (verbose) {
+					gettimeofday(&now, NULL);
+					elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
+					printf("end read %d %d %.1lf\n", id, length, elapsed);
+				}
+				if (verify && *(int*)bogus!=id) {
+					printf("expected %d got %d\n", id, *(int*)bogus);
+					exit(1);
+				}
 			}
-			device_pread_sync(dev, bogus, count, offset);
-			if (verbose) {
-				gettimeofday(&now, NULL);
-				elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
-				printf("end read %d %d %.1lf\n", id, length, elapsed);
+			if (ops&2) {
+				if (verbose) {
+					gettimeofday(&before, NULL);
+					printf("begin write %d %d %d\n", id, length, noise);
+				}
+				device_pwrite_sync(dev, bogus, count, offset);
+				if (verbose) {
+					gettimeofday(&now, NULL);
+					elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
+					printf("end write %d %d %.1lf\n", id, length, elapsed);
+				}
 			}
-			if (verify && *(int*)bogus!=id) {
-				printf("expected %d got %d\n", id, *(int*)bogus);
-				exit(1);
-			}
-			if (verbose) {
-				gettimeofday(&before, NULL);
-				printf("begin write %d %d %d\n", id, length, noise);
-			}
-			device_pwrite_sync(dev, bogus, count, offset);
-			if (verbose) {
-				gettimeofday(&now, NULL);
-				elapsed=(now.tv_sec-before.tv_sec)*(double)1e6+(now.tv_usec-before.tv_usec);
-				printf("end write %d %d %.1lf\n", id, length, elapsed);
-			}
-			usleep(time);
+			if (time!=0)
+				usleep(time);
 			pthread_mutex_lock(&mtx);
 			cnt+=count;
 			pthread_mutex_unlock(&mtx);
@@ -151,6 +156,7 @@ void usage() {
 	fprintf(stderr, "\t-b blocks -- storage size (default: 1024 blocks)\n");
 	fprintf(stderr, "\t-u -- unaligned blocks (default: no)\n");
 	fprintf(stderr, "\t-r rate -- blocks/second (default: 1000)\n");
+	fprintf(stderr, "\t-o rw -- read, write, or read/write workload (default: rw)\n");
 	fprintf(stderr, "\t-c -- CSV output (default: no)\n");
 	fprintf(stderr, "\t-v -- verbose (default: no)\n");
 	exit(1);
@@ -161,7 +167,7 @@ int main(int argc, char* argv[]) {
 	struct device storage, snapshot, cow, ba, *target;
 	struct sockaddr_in coord;
 
-	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fuc"))!=-1) {
+	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fuco:"))!=-1) {
 		switch(opt) {
 			case 'a':
 				aio = 1;
@@ -196,6 +202,9 @@ int main(int argc, char* argv[]) {
 			case 'l':
 				length = atoi(optarg);
 				break;
+			case 'o':
+				ops = (strchr(optarg, 'r')?1:0) | (strchr(optarg, 'w')?2:0);
+				break;
 			case 'c':
 				csv = 1;
 				break;
@@ -210,9 +219,14 @@ int main(int argc, char* argv[]) {
 		usage();
 	}
 
-	time = (int)(1000000/(((double)rate)/maxthr));
+	if (rate!=0) {
+		time = (int)(1000000/(((double)rate)/maxthr));
+		fprintf(stderr, "Target IO rate: %.2lf blocks/second (%d threads)\n", ((double)1000000)*maxthr*length/time, maxthr);
+	} else {
+		fprintf(stderr, "Unbounded IO rate (%d threads)\n", maxthr);
+		time = 0;
+	}
 
-	fprintf(stderr, "Target IO rate: %.2lf blocks/second (%d threads)\n", ((double)1000000)*maxthr*length/time, maxthr);
 
 	if (null) {
 		fprintf(stderr, "Null storage.\n");
@@ -229,12 +243,14 @@ int main(int argc, char* argv[]) {
 		fprintf(stderr, "Initializing storage: %ld blocks of %d bytes\n", maxblk, BLKSIZE);
 		workload_init(&storage);
 	} else {
-		struct stat sbuf;
-		if (stat(argv[optind], &sbuf)<0) {
-			perror(argv[optind]);
-			exit(1);
+		if (!null) {
+			struct stat sbuf;
+			if (stat(argv[optind], &sbuf)<0) {
+				perror(argv[optind]);
+				exit(1);
+			}
+			maxblk = sbuf.st_size/BLKSIZE;
 		}
-		maxblk = sbuf.st_size/BLKSIZE;
 		fprintf(stderr, "Opened: %ld blocks of %d bytes.\n", maxblk, BLKSIZE);
 	}
 
