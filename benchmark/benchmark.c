@@ -76,7 +76,7 @@ void* workload_thread(void* p) {
 		for(j=0;j<10;j++) {
 			struct timeval before;
 			int id=(random()%(maxblk-length+1));
-			int offset=id*BLKSIZE;
+			off64_t offset=((off64_t)id)*BLKSIZE;
 			int count=BLKSIZE*length;
 			int noise=0;
 			if (!align) {
