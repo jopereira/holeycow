@@ -219,7 +219,7 @@ int main(int argc, char* argv[]) {
 		nullbe_open(&storage);
 	} else if (aio) {
 		fprintf(stderr, "Disk storage (AIO backend).\n");
-		aiobe_open(&storage, argv[optind], O_RDWR|O_SYNC|O_DIRECT, 0);
+		aiobe_open(&storage, argv[optind], O_RDWR|O_DIRECT, 0);
 	} else {
 		fprintf(stderr, "Disk storage (synchronous backend).\n");
 		posixbe_open(&storage, argv[optind], O_RDWR, 0);
