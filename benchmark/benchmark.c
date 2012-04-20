@@ -86,10 +86,10 @@ void* workload_thread(void* p) {
 			}
 			gettimeofday(&before, NULL);
 			if (ops&1) {
-				if (verbose)
+				if (verbose>0)
 					printf("begin read %d %d %d\n", id, length, noise);
 				device_pread_sync(dev, bogus, count, offset);
-				if (verbose)
+				if (verbose>0)
 					printf("end read %d %d %.1lf\n", id, length);
 				if (verify && *(int*)bogus!=id) {
 					printf("expected %d got %d\n", id, *(int*)bogus);
@@ -97,10 +97,10 @@ void* workload_thread(void* p) {
 				}
 			}
 			if (ops&2) {
-				if (verbose)
+				if (verbose>0)
 					printf("begin write %d %d %d\n", id, length, noise);
 				device_pwrite_sync(dev, bogus, count, offset);
-				if (verbose)
+				if (verbose>0)
 					printf("end write %d %d %.1lf\n", id, length);
 			}
 			gettimeofday(&now, NULL);
@@ -134,7 +134,8 @@ void workload(struct device* dev) {
 
 	for(i=0;i<maxthr;i++)
 		pthread_create(&load[i], NULL, workload_thread, dev);
-	pthread_create(&rep, NULL, reporter_thread, NULL);
+	if (verbose>=0)
+		pthread_create(&rep, NULL, reporter_thread, NULL);
 	for(i=0;i<maxthr;i++)
 		pthread_join(load[i], NULL);
 }
@@ -157,6 +158,7 @@ void usage() {
 	fprintf(stderr, "\t-o rw -- read, write, or read/write workload (default: rw)\n");
 	fprintf(stderr, "\t-c -- CSV output (default: no)\n");
 	fprintf(stderr, "\t-v -- verbose (default: no)\n");
+	fprintf(stderr, "\t-q -- quiet (default: no)\n");
 	exit(1);
 }
 
@@ -165,7 +167,7 @@ int main(int argc, char* argv[]) {
 	struct device storage, snapshot, cow, ba, *target;
 	struct sockaddr_in coord;
 
-	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fuco:"))!=-1) {
+	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fuco:q"))!=-1) {
 		switch(opt) {
 			case 'a':
 				aio = 1;
@@ -196,6 +198,9 @@ int main(int argc, char* argv[]) {
 				break;
 			case 'v':
 				verbose = 1;
+				break;
+			case 'q':
+				verbose = -1;
 				break;
 			case 'l':
 				length = atoi(optarg);
