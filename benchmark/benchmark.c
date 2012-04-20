@@ -34,6 +34,7 @@
 
 static int verify=0, maxthr=100, time, length=1, verbose=0, align=1, csv=0, ops=3;
 static uint64_t maxblk=1024;
+static char* host = "127.0.0.1";
 
 pthread_mutex_t mtx;
 int cnt,iocnt;
@@ -146,6 +147,7 @@ void usage() {
 	fprintf(stderr, "Standalone mode: benchmark storage\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "\t-p port -- set HoleyCoW coordinator port (default: 12345)\n");
+	fprintf(stderr, "\t-h host -- set HoleyCoW coordinator host (default: 127.0.0.1)\n");
 	fprintf(stderr, "\t-a -- use asynchronous I/O (default: no)\n");
 	fprintf(stderr, "\t-n -- use null backend (default: no)\n");
 	fprintf(stderr, "\t-i -- initialize storage (default: no)\n");
@@ -167,7 +169,7 @@ int main(int argc, char* argv[]) {
 	struct device storage, snapshot, cow, ba, *target;
 	struct sockaddr_in coord;
 
-	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fuco:q"))!=-1) {
+	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fuco:qh:"))!=-1) {
 		switch(opt) {
 			case 'a':
 				aio = 1;
@@ -180,6 +182,9 @@ int main(int argc, char* argv[]) {
 				break;
 			case 'p':
 				port = atoi(optarg);
+				break;
+			case 'h':
+				host = optarg;
 				break;
 			case 't':
 				maxthr = atoi(optarg);
@@ -269,7 +274,7 @@ int main(int argc, char* argv[]) {
 		memset(&coord, 0, sizeof(struct sockaddr_in));
 		coord.sin_family = AF_INET;
 		coord.sin_port = htons(port);
-		inet_aton("127.0.0.1", &coord.sin_addr);
+		inet_aton(host, &coord.sin_addr);
 
 		if (connect(fd, (struct sockaddr*) &coord, sizeof(struct sockaddr_in))<0) {
 			perror("connect coordination");
