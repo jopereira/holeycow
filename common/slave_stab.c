@@ -41,48 +41,28 @@
 static block_t* buffer;
 static int max, h;		/* capacity and head */
 static int st, sn;		/* sender tail and size */
-static int rt, rn;		/* receiver tail and size */
 
 static pthread_mutex_t mux;
-static pthread_cond_t notempty, notfull, ready;
+static pthread_cond_t notfull, ready;
 
 static int sfd=-1, sock=-1;
 
 static callback_t callback;
 static void* cookie;
 
-static pthread_t sender, receiver, pool;
+static pthread_t sender, receiver;
 
 /* Statistics */
 int s_s_num, s_s_size;
 
-static void* pool_thread(void* p) {
+void done_block(int idx) {
 	pthread_mutex_lock(&mux);
-	while(1) {
-		int idx;
 
-		while(rn==0 && sfd>=0)
-			pthread_cond_wait(&notempty, &mux);
+	buffer[idx]=-1;
+	if (idx==st)
+		pthread_cond_signal(&ready);
 
-		if (sfd<0) {
-			pthread_mutex_unlock(&mux);
-			return NULL;
-		}
-
-		idx=rt;
-		rt=(rt+1)%max;
-		rn--;
-
-		pthread_mutex_unlock(&mux);
-
-		callback(buffer[idx], cookie);
-
-		pthread_mutex_lock(&mux);
-
-		buffer[idx]=-1;
-		if (idx==st)
-			pthread_cond_signal(&ready);
-	}
+	pthread_mutex_unlock(&mux);
 }
 
 static void* sender_thread(void* p) {
@@ -125,7 +105,7 @@ static void receiver_thread_loop() {
 
 	while(1) {
 
-		int size=0;
+		int idx, size=0;
 		
 		while(size==0) {
 			size=max-sn;
@@ -150,14 +130,16 @@ static void receiver_thread_loop() {
 		}
 
 		size/=sizeof(block_t);
-		h=(h+size)%max;
 
 		pthread_mutex_lock(&mux);
-
 		sn+=size;
-		rn+=size;
+		pthread_mutex_unlock(&mux);
 
-		pthread_cond_broadcast(&notempty);
+		while(size!=0) {
+			callback(buffer[h], h, cookie);
+			h=(h+1)%max;
+			size--;
+		}
 	}
 }
 
@@ -209,13 +191,10 @@ void slave_stab(int s, int sz, int npool, callback_t cb, void* c) {
 	sfd=s;
 
 	pthread_mutex_init(&mux, NULL);
-	pthread_cond_init(&notempty, NULL);
 	pthread_cond_init(&notfull, NULL);
 	pthread_cond_init(&ready, NULL);
 
 	pthread_create(&receiver, NULL, receiver_thread, NULL);
-	for(i=0;i<npool;i++)
-		pthread_create(&pool, NULL, pool_thread, NULL);
 }
 
 void slave_stop() {

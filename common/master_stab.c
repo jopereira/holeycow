@@ -212,7 +212,7 @@ static void* pool_thread(void* p) {
 
 		pthread_mutex_unlock(&mux);
 
-		callback(buffer[idx], cookiejar[idx]);
+		callback(buffer[idx], 0, cookiejar[idx]);
 
 		pthread_mutex_lock(&mux);
 

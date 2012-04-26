@@ -25,7 +25,7 @@
 #include <sys/types.h>
 
 typedef uint64_t block_t;
-typedef void (*callback_t)(block_t, void*);
+typedef void (*callback_t)(block_t, int idx, void*);
 
 /* master aka designated writer */
 void master_stab(int s, callback_t, int npool);
@@ -36,6 +36,7 @@ void wait_sync(int dump);
 
 /* slave aka copier */
 void slave_stab(int sock, int s, int npool, callback_t cb, void* cookie);
+void done_block(int idx);
 void slave_stop();
 
 #endif

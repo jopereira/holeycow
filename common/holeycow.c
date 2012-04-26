@@ -187,7 +187,7 @@ static void master_end_write_cb(void* cookie, int ret) {
 	free(pend);
 }
 
-static void master_delayed_write_cb(block_t id, void* cookie) {
+static void master_delayed_write_cb(block_t id, int idx, void* cookie) {
 	struct pending* pend = (struct pending*) cookie; 
 
 	int done = 0;
@@ -263,6 +263,7 @@ struct delayed_cow {
 	char buffer[BLKSIZE];
 	struct device* dev;
 	block_t id;
+	int idx;
 };
 
 static void slave_end_cow_cb(void* cookie, int ret) {
@@ -277,39 +278,48 @@ static void slave_end_cow_cb(void* cookie, int ret) {
 	free(cow);
 }
 
-static void slave_cow_cb(block_t id, void* cookie) {
+static void slave_done_cow_cb(void* cookie, int ret) {
+	struct delayed_cow* cow = (struct delayed_cow*) cookie;
+
+	/* Ack the writer, as we already hold a copy in memory. */
+	done_block(cow->idx);
+
+  	pthread_mutex_lock(&D(cow->dev)->mutex_cow);
+	/* There can be concurrent CoWs to the same block. */
+	wait_transit(cow->dev, cow->id);
+	if (test(cow->dev, cow->id)) {
+		pthread_mutex_unlock(&D(cow->dev)->mutex_cow);
+		free(cow);
+		return;
+	}
+
+	/* Not in transit and not CoWed. Do it now. */
+	start_transit(cow->dev, cow->id);
+  	pthread_mutex_unlock(&D(cow->dev)->mutex_cow);
+
+	device_pwrite(D(cow->dev)->snapshot, cow->buffer, BLKSIZE, cow->id, slave_end_cow_cb, cow);
+}
+
+static void slave_cow_cb(block_t id, int idx, void* cookie) {
 	struct device* dev = (struct device*) cookie;
 
   	pthread_mutex_lock(&D(dev)->mutex_cow);
 	if (test(dev, id)) {
 		pthread_mutex_unlock(&D(dev)->mutex_cow);
+
+		/* Already done. */
+		done_block(idx);
 		return;
 	}
 	D(dev)->s_stfr++;
   	pthread_mutex_unlock(&D(dev)->mutex_cow);
 
 	struct delayed_cow* cow = (struct delayed_cow*) memalign(512, sizeof(struct delayed_cow));
-	device_pread_sync(D(dev)->storage, cow->buffer, BLKSIZE, id);
-	
-  	pthread_mutex_lock(&D(dev)->mutex_cow);
-	/* There can be concurrent CoWs to the same block. */
-	wait_transit(dev, id);
-	if (test(dev, id)) {
-		free(cow);
-		pthread_mutex_unlock(&D(dev)->mutex_cow);
-		return;
-	}
-	/* Not in transit and not CoWed. Do it now. */
-	cow->id = id;
 	cow->dev = dev;
-	start_transit(dev, id);
-  	pthread_mutex_unlock(&D(dev)->mutex_cow);
-	
-	device_pwrite(D(dev)->snapshot, cow->buffer, BLKSIZE, id, slave_end_cow_cb, cow);
-
-	/* Returning acks the writer copy, as we already hold a copy in memory. */
+	cow->id = id;
+	cow->idx = idx;
+	device_pread(D(dev)->storage, cow->buffer, BLKSIZE, id, slave_done_cow_cb, cow);
 }
-
 
 static void slave_pwrite(struct device* dev, void* data, size_t count,  off64_t offset, dev_callback_t cb, void* cookie) {
   	pthread_mutex_lock(&D(dev)->mutex_cow);
