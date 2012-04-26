@@ -604,7 +604,7 @@ static void pre_init(struct device* dev) {
 }
 
 static void slave_init(struct device* dev) {
-	slave_stab(D(dev)->sfd, STAB_QUEUE, 100, slave_cow_cb, dev);
+	slave_stab(D(dev)->sfd, STAB_QUEUE, slave_cow_cb, dev);
 
 	pthread_mutex_lock(&D(dev)->mutex_cow);
 	dev->ops = &slave_device_ops;

@@ -43,7 +43,7 @@ static int max, h;		/* capacity and head */
 static int st, sn;		/* sender tail and size */
 
 static pthread_mutex_t mux;
-static pthread_cond_t notfull, ready;
+static pthread_cond_t notfull;
 
 static int sfd=-1, sock=-1;
 
@@ -59,45 +59,33 @@ void done_block(int idx) {
 	pthread_mutex_lock(&mux);
 
 	buffer[idx]=-1;
-	if (idx==st)
-		pthread_cond_signal(&ready);
+
+	if(sn==0 || buffer[st]!=-1) {
+		pthread_mutex_unlock(&mux);
+		return;
+	}
+
+	int size=0;
+	while(sn-size>0 && buffer[st+size]==-1)
+		size++;
+
+	st=(st+size)%max;
+	sn-=size;
+
+	pthread_cond_signal(&notfull);
 
 	pthread_mutex_unlock(&mux);
-}
 
-static void* sender_thread(void* p) {
-	while(1) {
-		int size;
- 		pthread_mutex_lock(&mux);
-
-		/* This loop will be exited on cleanup, failing on write below.
-		   and returning. */
-		while((sn==0 || buffer[st]!=-1) && sfd>=0)
-			pthread_cond_wait(&ready, &mux);
-
-		size=0;
-		while(sn-size>0 && buffer[st+size]==-1)
-			size++;
-
-		st=(st+size)%max;
-		sn-=size;
-
-		pthread_cond_signal(&notfull);
-
+	if (write(sock, &size, sizeof(size))!=sizeof(size)) {
+		pthread_mutex_lock(&mux);
+		shutdown(sock, SHUT_RD|SHUT_WR);
+		close(sock);
+		sock=-1;
 		pthread_mutex_unlock(&mux);
-
-		if (write(sock, &size, sizeof(size))!=sizeof(size)) {
-			pthread_mutex_lock(&mux);
-			shutdown(sock, SHUT_RD|SHUT_WR);
-			close(sock);
-			sock=-1;
-			pthread_mutex_unlock(&mux);
-			return NULL;
-		}
-	
-		s_s_size+=size;
-		s_s_num++;
 	}
+
+	s_s_size+=size;
+	s_s_num++;
 }
 
 static void receiver_thread_loop() {
@@ -147,8 +135,6 @@ static void* receiver_thread(void* p) {
 	int len;
 	struct sockaddr_in master;
 
-	pthread_create(&sender, NULL, sender_thread, NULL);
-
 	while(sfd>=0) {
 		len=sizeof(master);
 		memset(&master, 0, sizeof(master));
@@ -173,7 +159,7 @@ static void* receiver_thread(void* p) {
 	return NULL;
 }
 
-void slave_stab(int s, int sz, int npool, callback_t cb, void* c) {
+void slave_stab(int s, int sz, callback_t cb, void* c) {
 	int i;
 
     int flags;
@@ -192,7 +178,6 @@ void slave_stab(int s, int sz, int npool, callback_t cb, void* c) {
 
 	pthread_mutex_init(&mux, NULL);
 	pthread_cond_init(&notfull, NULL);
-	pthread_cond_init(&ready, NULL);
 
 	pthread_create(&receiver, NULL, receiver_thread, NULL);
 }
@@ -208,7 +193,6 @@ void slave_stop() {
 	shutdown(sock, SHUT_RD|SHUT_WR);
 	close(sock);
 	sock=-1;
-	pthread_cond_signal(&ready);
 
 	pthread_mutex_unlock(&mux);
 
