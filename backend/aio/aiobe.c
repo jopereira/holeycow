@@ -31,10 +31,12 @@
 
 #define D(dev) ((struct aiobe_data*)(dev)->data)
 
+#define POOL 10
+
 struct aiobe_data {
 	int fd;
 	io_context_t ctx;
-	pthread_t cbt;
+	pthread_t cbt[POOL];
 };
 
 struct aiobe_request {
@@ -106,6 +108,8 @@ struct device_ops aiobe_device_ops = {
 };
 
 int aiobe_open(struct device* dev, char* path, int flags, mode_t mode) {
+	int i;
+
 	dev->ops = &aiobe_device_ops;
 	dev->data = malloc(sizeof(struct aiobe_data));
 
@@ -123,7 +127,8 @@ int aiobe_open(struct device* dev, char* path, int flags, mode_t mode) {
 		return -1;
 	}
 
-	pthread_create(&D(dev)->cbt, NULL, aiobe_thread, dev);
+	for(i=0;i<10;i++)
+		pthread_create(&D(dev)->cbt[i], NULL, aiobe_thread, dev);
 	return 0;
 }
 
