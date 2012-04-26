@@ -28,6 +28,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -178,6 +179,9 @@ static void* receiver_thread(void* p) {
 			}
 			break;
 		}
+
+		int flag=1;
+		setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, sizeof(int));
 
 		receiver_thread_loop();
 	}

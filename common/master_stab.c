@@ -22,6 +22,7 @@
 #include <sys/types.h> 
 #include <sys/socket.h> 
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -182,6 +183,9 @@ static void* sender_thread(void* param) {
 			sleep(1);
 			continue;
 		}
+
+		int flag=1;
+		setsockopt(me->sock, IPPROTO_TCP, TCP_NODELAY, (char*)&flag, sizeof(int));
 
 		pthread_create(&receiver, NULL, receiver_thread, me);
 
