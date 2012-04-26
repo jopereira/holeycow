@@ -57,7 +57,7 @@ static int eh, et;		/* epoch for sync (h=eh%max, ft=et%max) */
 static int started = 0;
 
 static pthread_mutex_t mux;
-static pthread_cond_t notempty, ready, sync1;
+static pthread_cond_t notempty, sync1;
 
 static callback_t callback;
 
@@ -65,6 +65,33 @@ static pthread_t pool;
 
 /* Statistics */
 int s_m_num, s_m_size;
+
+static void handle_ack() {
+	while(rn>0) {
+		int idx=rt;
+		rt=(rt+1)%max;
+		rn--;
+
+		fn++;
+
+		pthread_mutex_unlock(&mux);
+
+		callback(buffer[idx], 0, cookiejar[idx]);
+
+		pthread_mutex_lock(&mux);
+
+		buffer[idx]=-1;
+		cookiejar[idx]=NULL;
+
+		while(fn>0 && buffer[ft]==-1) {
+			fn--;
+			ft=(ft+1)%max;
+
+			et++;
+		}
+		pthread_cond_broadcast(&sync1);
+	}
+}
 
 static void* receiver_thread(void* param) {
 	struct slave* me=(struct slave*)param, *p;
@@ -98,7 +125,7 @@ static void* receiver_thread(void* param) {
 			wn-=size;
 			rn+=size;
 
-			pthread_cond_broadcast(&ready);
+			handle_ack();
 		}
 
 		pthread_mutex_unlock(&mux);
@@ -195,41 +222,7 @@ static void* sender_thread(void* param) {
 	}
 }
 
-static void* pool_thread(void* p) {
-       
-	pthread_mutex_lock(&mux);
-	while(1) {
-
-		int idx;
-		while(rn==0)
-			pthread_cond_wait(&ready, &mux);
-                      
-		idx=rt;
-		rt=(rt+1)%max;
-		rn--;
-
-		fn++;
-
-		pthread_mutex_unlock(&mux);
-
-		callback(buffer[idx], 0, cookiejar[idx]);
-
-		pthread_mutex_lock(&mux);
-
-		buffer[idx]=-1;
-		cookiejar[idx]=NULL;
-
-		while(fn>0 && buffer[ft]==-1) {
-			fn--;
-			ft=(ft+1)%max;
-
-			et++;
-		}
-		pthread_cond_broadcast(&sync1);
-	}
-}
-
-void master_stab(int sz, callback_t cb, int npool) {
+void master_stab(int sz, callback_t cb) {
 	int i;
 
 	max=sz;
@@ -240,11 +233,7 @@ void master_stab(int sz, callback_t cb, int npool) {
 
 	pthread_mutex_init(&mux, NULL);
 	pthread_cond_init(&notempty, NULL);
-	pthread_cond_init(&ready, NULL);
 	pthread_cond_init(&sync1, NULL);
-
-	for(i=0;i<npool;i++)
-		pthread_create(&pool, NULL, pool_thread, NULL);
 
 	started = 1;
 }
@@ -302,7 +291,7 @@ void del_slave(struct sockaddr_in* addr) {
 	} else
 		gc_slaves();
 
-	pthread_cond_broadcast(&ready);
+	handle_ack();
 
 	pthread_mutex_unlock(&mux);
 
@@ -336,7 +325,7 @@ int add_block(block_t id, void* cookie) {
 
 		/* Fake receive */
 		rn++;
-		pthread_cond_broadcast(&ready);
+		handle_ack();
 	}
 
 	pthread_mutex_unlock(&mux);

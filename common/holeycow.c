@@ -523,7 +523,7 @@ static int master_init(struct device* dev, int nslaves, struct sockaddr_in* slav
 	D(dev)->bitmap=(int*)calloc((D(dev)->max_size/BLKSIZE)/8+sizeof(int), 1);
 	D(dev)->transit=(int*)calloc((D(dev)->max_size/BLKSIZE)/8+sizeof(int), 1);
 
-	master_stab(STAB_QUEUE, master_delayed_write_cb, 20);
+	master_stab(STAB_QUEUE, master_delayed_write_cb);
 	for(i=0;i<nslaves;i++)
 		add_slave(slave+i);
 
