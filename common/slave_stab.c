@@ -50,7 +50,7 @@ static int sfd=-1, sock=-1;
 static callback_t callback;
 static void* cookie;
 
-static pthread_t sender, receiver;
+static pthread_t receiver;
 
 /* Statistics */
 int s_s_num, s_s_size;
@@ -153,8 +153,6 @@ static void* receiver_thread(void* p) {
 
 		receiver_thread_loop();
 	}
-
-	pthread_join(sender, NULL);
 
 	return NULL;
 }
