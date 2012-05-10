@@ -32,6 +32,10 @@
 
 #include <common/holeycow.h>
 
+#ifdef DISKSIM
+static char* parv = NULL;
+#endif
+
 static int verify=0, maxthr=100, time, length=1, verbose=0, align=1, csv=0, ops=3;
 static uint64_t maxblk=1024;
 static char* host = "127.0.0.1";
@@ -150,6 +154,9 @@ void usage() {
 	fprintf(stderr, "\t-h host -- set HoleyCoW coordinator host (default: 127.0.0.1)\n");
 	fprintf(stderr, "\t-a -- use asynchronous I/O (default: no)\n");
 	fprintf(stderr, "\t-n -- use null backend (default: no)\n");
+#ifdef DISKSIM
+	fprintf(stderr, "\t-S parv -- use DiskSim model (default: none)\n");
+#endif
 	fprintf(stderr, "\t-i -- initialize storage (default: no)\n");
 	fprintf(stderr, "\t-l -- request length in pages (default: 1)\n");
 	fprintf(stderr, "\t-f -- verify data read (default: no)\n");
@@ -166,10 +173,10 @@ void usage() {
 
 int main(int argc, char* argv[]) {
 	int fd, opt, aio=0, null=0, port=12345, init=0, rate=1000;
-	struct device storage, snapshot, cow, ba, *target;
+	struct device nulls, storage, sim, snapshot, cow, ba, *target;
 	struct sockaddr_in coord;
 
-	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fuco:qh:"))!=-1) {
+	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fuco:qh:S:"))!=-1) {
 		switch(opt) {
 			case 'a':
 				aio = 1;
@@ -177,6 +184,11 @@ int main(int argc, char* argv[]) {
 			case 'n':
 				null = 1;
 				break;
+#ifdef DISKSIM
+			case 'S':
+				parv = optarg;
+				break;
+#endif
 			case 'i':
 				init = 1;
 				break;
@@ -262,10 +274,20 @@ int main(int argc, char* argv[]) {
 		fprintf(stderr, "Opened: %ld blocks of %d bytes.\n", maxblk, BLKSIZE);
 	}
 
+	target = &storage;
+
+#ifdef DISKSIM
+	if (parv!=NULL) {
+		fprintf(stderr, "Adding DiskSim storage performance filter: %s.\n", parv);
+		simbe_open(&sim, target, parv);
+
+		target = &sim;
+	}
+#endif
+
 	if (argc-optind==1) {
 		/* Standalone mode */
 		fprintf(stderr, "Running in Standalone mode.\n");
-		target = &storage;
 	} else {
 		fprintf(stderr, "Running in HoleyCoW mode (coordinator port = %d).\n", port);
 		/* HoleyCoW mode */
@@ -287,7 +309,7 @@ int main(int argc, char* argv[]) {
 			aiobe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
 		else
 			posixbe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
-		holey_open(&cow, &storage, &snapshot, maxblk*BLKSIZE, fd);
+		holey_open(&cow, target, &snapshot, maxblk*BLKSIZE, fd);
 		blockalign(&ba, &cow);
 	
 		target = &ba;

@@ -1,13 +1,24 @@
 
+HC_TOPDIR = $(shell pwd)
+DS_TOPDIR =  $(HC_TOPDIR)/../../disksim/disksim-4.0/
+
 include Makefile.inc
 
-OBJS = common/holeycow.o common/master_stab.o common/slave_stab.o common/device.o \
-	backend/null/nullbe.o backend/aio/aiobe.o backend/posix/posixbe.o
+ifdef DISKSIM
+DS_OBJS = backend/simbe.o
+endif
 
-all: libholeycow.a
+OBJS = common/holeycow.o common/master_stab.o common/slave_stab.o common/device.o \
+	backend/nullbe.o backend/aiobe.o backend/posixbe.o $(DS_OBJS)
+
+all: libholeycow.a benchmark/benchmark
 
 libholeycow.a: $(OBJS)
-	ar r libholeycow.a $(OBJS)
+	ar rs libholeycow.a $(OBJS)
+
+benchmark/benchmark: benchmark/benchmark.o
+	cc $< -o $@ $(CFLAGS) $(LDFLAGS)
 
 clean:
-	rm -f $(OBJS)
+	rm -f $(OBJS) benchmark/benchmark benchmark/benchmark.o libholeycow.a
+

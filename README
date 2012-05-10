@@ -1,23 +1,27 @@
-HoleyCoW allows replicated shared-nothing software (e.g. a DBMS server)
-to be used to build a shared-storage cluster.
+HoleyCoW allows replicated shared-nothing software (e.g. a DBMS
+server) to be used to build a shared-storage cluster. Bindings for the
+HolyeCoW stack for Xen and QEMU-KVM can be found elsewhere. Please
+ask.
 
-HoleyCoW-Xen version allows to run the algorithm with XEN instead of MYSQL.
+To compile:
 
-HoleyCoW-Xen project is a reasearch project at the Computer Science and
-Technology Center at the University of Minho, by José Pereira and João Paulo.
-Work leading to this project was partially funded by FEDER through FCT by 
-project Pastramy (PTDC/EIA/72405/2006).
+	$ make
 
+To compile with support for DiskSim, have DiskSim 4.0 ready and:
+
+	$ make DISKSIM=y
+
+To test, follow the instructions in:
+
+	$ ./benchmark/benchmark -h
 
 For more information visit the http://holeycow.org.
 
+HoleyCoW a reasearch project in HASLab at INESC TEC & University of
+Minho, by José Pereira, João Paulo, Luciano Rocha, and Luís Soares.
+Work leading to this project was partially funded by FEDER through FCT
+by projects Pastramy (PTDC/EIA/72405/2006) and
+ReD (PDTC/EIA-EIA/109044/2008).
 
-The HoleyCoW-mysql project is a reasearch project at the Computer Science and
-Technology Center at the University of Minho, by José Pereira, Luís Soares
-and Luciano Rocha. Work leading to this project was partially funded by
-FEDER through FCT by project Pastramy (PTDC/EIA/72405/2006), Bolsa de
-Doutoramento (SFRH/BD/31114/2006), and EuroTux Informática S.A. We also
-thank all the GORDA team at the U. Minho.
-
-HoleyCoW-Xen is distributed under the GNU General Public License v2 or greater.
-See COPYING file for details.
+HoleyCoW is distributed under the GNU General Public License v2 or
+greater. See COPYING file for details.
