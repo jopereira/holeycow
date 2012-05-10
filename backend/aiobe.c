@@ -107,7 +107,7 @@ struct device_ops aiobe_device_ops = {
 	aiobe_close
 };
 
-int aiobe_open(struct device* dev, char* path, int flags, mode_t mode) {
+int aiobe_open(struct device* dev, const char* path, int flags, mode_t mode) {
 	int i;
 
 	dev->ops = &aiobe_device_ops;

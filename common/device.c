@@ -47,7 +47,7 @@ static void sync_cb(void* cookie, int ret) {
 	pthread_mutex_unlock(&data->mutex);
 }
 
-int device_pwrite_sync(struct device* dev, void* buf, size_t size, off64_t offset) {
+int device_pwrite_sync(struct device* dev, const void* buf, size_t size, off64_t offset) {
 	struct cb_data data = {
 		PTHREAD_MUTEX_INITIALIZER,
 		PTHREAD_COND_INITIALIZER,

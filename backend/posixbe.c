@@ -52,7 +52,7 @@ struct device_ops posixbe_device_ops = {
 	posixbe_close
 };
 
-int posixbe_open(struct device* dev, char* path, int flags, mode_t mode) {
+int posixbe_open(struct device* dev, const char* path, int flags, mode_t mode) {
 	dev->ops = &posixbe_device_ops;
 	dev->data = malloc(sizeof(struct posixbe_data));
 

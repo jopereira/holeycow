@@ -1,8 +1,11 @@
 
-HC_TOPDIR = $(shell pwd)
+HC_TOPDIR = $(CURDIR)
 DS_TOPDIR =  $(HC_TOPDIR)/../../disksim/disksim-4.0/
 
 include Makefile.inc
+
+CFLAGS = $(HCOW_CFLAGS) -fPIC -O3
+LDFLAGS = $(HCOW_LDFLAGS)
 
 ifdef DISKSIM
 DS_OBJS = backend/simbe.o

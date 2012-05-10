@@ -53,7 +53,7 @@ struct device {
 #define device_close(dev) (dev)->ops->close(dev)
 
 /* Simulate synchronous I/O */
-extern int device_pwrite_sync(struct device*, void*, size_t, off64_t);
+extern int device_pwrite_sync(struct device*, const void*, size_t, off64_t);
 extern int device_pread_sync(struct device*, void*, size_t, off64_t);
 
 /* Enforce block aligned I/O */

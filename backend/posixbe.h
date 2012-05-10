@@ -24,6 +24,6 @@
 
 #include <common/holeycow.h>
 
-extern int posixbe_open(struct device* dev, char* path, int flags, mode_t mode);
+extern int posixbe_open(struct device* dev, const char* path, int flags, mode_t mode);
 
 #endif

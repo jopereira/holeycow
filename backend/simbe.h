@@ -24,6 +24,6 @@
 
 #include <common/holeycow.h>
 
-extern int simbe_open(struct device* dev, struct device* target, char* priv);
+extern int simbe_open(struct device* dev, struct device* target, const char* priv);
 
 #endif

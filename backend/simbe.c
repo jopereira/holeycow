@@ -235,7 +235,7 @@ struct device_ops simbe_device_ops = {
 	simbe_close
 };
 
-int simbe_open(struct device* dev, struct device* target, char* priv) {
+int simbe_open(struct device* dev, struct device* target, const char* priv) {
 	struct timeval now;
 
 	dev->ops = &simbe_device_ops;
