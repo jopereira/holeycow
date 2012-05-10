@@ -113,6 +113,8 @@ static void* time_thread(void* p) {
 			pthread_mutex_lock(&D(dev)->mtx);
 		}
 
+		pthread_cond_broadcast(&D(dev)->cond);
+
 		target = -1;
 		if (D(dev)->queue != NULL && (target < 0 || D(dev)->queue->deadline < target))
 			target = D(dev)->queue->deadline;
@@ -173,6 +175,7 @@ static void simbe_complete(void* cookie, int ret) {
 
 	pthread_mutex_lock(&D(req->dev)->mtx);
 	req->done = 1;
+	req->ret = ret;
 	if (req->deadline > 0)
 		pthread_cond_broadcast(&D(req->dev)->cond);
 	pthread_mutex_unlock(&D(req->dev)->mtx);
