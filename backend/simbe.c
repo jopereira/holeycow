@@ -38,8 +38,7 @@ struct simbe_request {
 
 	double deadline;
 	int done;
-	int ret;
-	struct simbe_request* next;
+	pthread_cond_t cond;
 
 	dev_callback_t cb;
 	void* cookie;
@@ -50,7 +49,6 @@ struct simbe_data {
 
 	pthread_mutex_t mtx;
 	pthread_cond_t cond;
-	struct simbe_request* queue;
 	pthread_t thr;
 
 	struct disksim_interface *disksim;
@@ -60,72 +58,37 @@ struct simbe_data {
 	double zero;
 };
 
-static double time_sync(struct device* dev) {
+/* Current time in millis */
+static double get_time() {
 	struct timeval now;
-	double time;
-
-	pthread_mutex_lock(&D(dev)->mtx);
-	while(1) {
-		gettimeofday(&now, NULL);
-
-		time = ((double)now.tv_sec)*1e3 + (((double)now.tv_usec)*1e-3);
-		if ((D(dev)->queue == NULL || D(dev)->queue->deadline > time) &&
-			(D(dev)->next < 0 || D(dev)->next+D(dev)->zero > time)) {
-			pthread_mutex_unlock(&D(dev)->mtx);
-			return time;
-		}
-		
-		pthread_cond_wait(&D(dev)->cond, &D(dev)->mtx);
-	}
+	gettimeofday(&now, NULL);
+	return ((double)now.tv_sec)*1e3 + (((double)now.tv_usec)*1e-3);
 }
 
 static void* time_thread(void* p) {
 	struct device* dev = (struct device*) p;
-	struct timeval now;
 	double time, target, delta;
 
+	pthread_mutex_lock(&D(dev)->mtx);
 	while(1) {
-		pthread_mutex_lock(&D(dev)->mtx);
-		gettimeofday(&now, NULL);
+		time = get_time();
 
-		time = ((double)now.tv_sec)*1e3 + (((double)now.tv_usec)*1e-3);
+		/* Advance simulation time */
+
 		while(D(dev)->next > 0 && D(dev)->next+D(dev)->zero < time) {
 			double event = D(dev)->next;
 			D(dev)->next = -1;
 			disksim_interface_internal_event(D(dev)->disksim, event, 0);
 		}
 
-		if (D(dev)->queue!=NULL)
-		while(D(dev)->queue != NULL && D(dev)->queue->deadline <= time && D(dev)->queue->done) {
-			struct simbe_request* req = D(dev)->queue;
-			D(dev)->queue = req->next;
-			pthread_mutex_unlock(&D(dev)->mtx);
+		/* Advance real time */
 
-			gettimeofday(&now, NULL);
-			delta = ((double)now.tv_sec)*1e3 + (((double)now.tv_usec)*1e-3);
-			delta -= req->deadline;
-			if (delta >= 1)
-				fprintf(stderr, "simbe: warning: deadline exceeded by %lfms\n", delta);
-
-			req->cb(req->cookie, req->ret);
-			free(req);
-
-			pthread_mutex_lock(&D(dev)->mtx);
-		}
-
-		pthread_cond_broadcast(&D(dev)->cond);
-
-		target = -1;
-		if (D(dev)->queue != NULL && (target < 0 || D(dev)->queue->deadline < target))
-			target = D(dev)->queue->deadline;
-		if (D(dev)->next > 0 && (target < 0 || D(dev)->next+D(dev)->zero < target))
-			target = D(dev)->next+D(dev)->zero;
-	
-		if (target < 0)
+		if (D(dev)->next < 0)
+			/* Simulation is quiescent */
 			pthread_cond_wait(&D(dev)->cond, &D(dev)->mtx);
 		else {
 			struct timespec ts;
-			delta = target - time;
+			delta = D(dev)->next + D(dev)->zero - time;
 
 			if (delta > 0) {
 				ts.tv_sec = (int) delta*1e-3;
@@ -133,7 +96,6 @@ static void* time_thread(void* p) {
 				pthread_cond_timedwait(&D(dev)->cond, &D(dev)->mtx, &ts);
 			}
 		}
-		pthread_mutex_unlock(&D(dev)->mtx);
 	}
 }
 
@@ -159,26 +121,35 @@ static void sim_report_completion(double time, struct disksim_request *r, void *
 	struct simbe_request* req = (struct simbe_request*) r;
 	struct simbe_request** p;
 
-	/* No locking. This is called already within the lock. */
+	/* This is called already within the lock. */
 	req->deadline = time+D(dev)->zero;
-	for(p=&D(dev)->queue;*p != NULL && (*p)->deadline <= time; p=&(*p)->next)
-		;
-	req->next = *p;
-	*p = req;
-
 	if (req->done)
-		pthread_cond_broadcast(&D(dev)->cond);
+		pthread_cond_signal(&req->cond);
 }
 
 static void simbe_complete(void* cookie, int ret) {
 	struct simbe_request* req = (struct simbe_request*) cookie;
+	double delta;
 
+	/* Wait for simulation */
 	pthread_mutex_lock(&D(req->dev)->mtx);
 	req->done = 1;
-	req->ret = ret;
-	if (req->deadline > 0)
-		pthread_cond_broadcast(&D(req->dev)->cond);
+	pthread_cond_init(&req->cond, NULL);
+	while(req->deadline == 0)
+		pthread_cond_wait(&req->cond, &D(req->dev)->mtx);
 	pthread_mutex_unlock(&D(req->dev)->mtx);
+
+	/* Check validity */
+	delta = get_time()-req->deadline;
+	assert(delta >= 0);
+	if (delta >= 1)
+		fprintf(stderr, "simbe: warning: deadline exceeded by %lfms\n", delta);
+
+	/* Notify */
+	req->cb(req->cookie, ret);
+
+	pthread_cond_destroy(&req->cond);
+	free(req);
 }
 
 static void simbe_pwrite(struct device* dev, void* buf, size_t size, off64_t offset, dev_callback_t cb, void* cookie) {
@@ -189,7 +160,7 @@ static void simbe_pwrite(struct device* dev, void* buf, size_t size, off64_t off
 	req->cookie=cookie;
 	req->dev = dev;
 
-	double now = time_sync(dev);
+	double now = get_time();
 	req->sr.start = now-D(dev)->zero;
 	req->sr.flags = DISKSIM_WRITE;
 	req->sr.devno = 0;
@@ -211,7 +182,7 @@ static void simbe_pread(struct device* dev, void* buf, size_t size, off64_t offs
 	req->cookie=cookie;
 	req->dev = dev;
 
-	double now = time_sync(dev);
+	double now = get_time();
 	req->sr.start = now-D(dev)->zero;
 	req->sr.flags = DISKSIM_READ;
 	req->sr.devno = 0;
@@ -226,7 +197,7 @@ static void simbe_pread(struct device* dev, void* buf, size_t size, off64_t offs
 }
 
 static int simbe_close(struct device* dev) {
-	double now = time_sync(dev);
+	double now = get_time();
 	disksim_interface_shutdown(D(dev)->disksim, now-D(dev)->zero);
 	free(D(dev));
 	return 0;
@@ -247,7 +218,7 @@ int simbe_open(struct device* dev, struct device* target, const char* priv) {
 
 	D(dev)->target = target;
 	gettimeofday(&now, NULL);
-	D(dev)->zero = ((double)now.tv_sec)*1e3 + (((double)now.tv_usec)*1e-3);
+	D(dev)->zero = get_time();
 	D(dev)->next = -1;
 
 	pthread_mutex_init(&D(dev)->mtx, NULL);

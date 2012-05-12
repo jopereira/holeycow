@@ -19,8 +19,8 @@ all: libholeycow.a benchmark/benchmark
 libholeycow.a: $(OBJS)
 	ar rs libholeycow.a $(OBJS)
 
-benchmark/benchmark: benchmark/benchmark.o
-	cc $< -o $@ $(CFLAGS) $(LDFLAGS)
+benchmark/benchmark: benchmark/benchmark.o libholeycow.a
+	cc benchmark/benchmark.o -o $@ $(CFLAGS) $(LDFLAGS)
 
 clean:
 	rm -f $(OBJS) benchmark/benchmark benchmark/benchmark.o libholeycow.a
