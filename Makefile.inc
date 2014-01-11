@@ -1,5 +1,5 @@
 
-HCOW_CFLAGS += -I $(HC_TOPDIR) -fPIC -O3
+HCOW_CFLAGS += -I $(HC_TOPDIR)/include -fPIC -O3
 HCOW_LDFLAGS += -L $(HC_TOPDIR) -lholeycow -lpthread -laio
 
 ifdef DISKSIM

@@ -1,6 +1,6 @@
 /*
- * HoleyCoW - The holey copy-on-write library
- * Copyright (C) 2008 José Orlando Pereira, Luís Soares
+ * HoleyCoW-SBD
+ * Copyright (C) 2008,2014 Universidade do Minho
  * 
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -30,7 +30,7 @@
 #include <assert.h>
 #include <unistd.h>
 
-#include <common/holeycow.h>
+#include <holeycow/device.h>
 
 #ifdef DISKSIM
 static char* parv = NULL;
@@ -147,11 +147,8 @@ void workload(struct device* dev) {
 
 
 void usage() {
-	fprintf(stderr, "HoleyCoW mode: benchmark storage snapshot\n");
-	fprintf(stderr, "Standalone mode: benchmark storage\n");
+	fprintf(stderr, "Usage: benchmark storage\n");
 	fprintf(stderr, "Options:\n");
-	fprintf(stderr, "\t-p port -- set HoleyCoW coordinator port (default: 12345)\n");
-	fprintf(stderr, "\t-h host -- set HoleyCoW coordinator host (default: 127.0.0.1)\n");
 	fprintf(stderr, "\t-a -- use asynchronous I/O (default: no)\n");
 	fprintf(stderr, "\t-n -- use null backend (default: no)\n");
 #ifdef DISKSIM
@@ -172,11 +169,10 @@ void usage() {
 }
 
 int main(int argc, char* argv[]) {
-	int fd, opt, aio=0, null=0, port=12345, init=0, rate=1000;
-	struct device nulls, storage, sim, snapshot, cow, ba, *target;
-	struct sockaddr_in coord;
+	int fd, opt, aio=0, null=0, init=0, rate=1000;
+	struct device nulls, storage, sim, cow, ba, *target;
 
-	while((opt = getopt(argc, argv, "anip:t:b:vr:l:fuco:qh:S:"))!=-1) {
+	while((opt = getopt(argc, argv, "anit:b:vr:l:fuco:qS:"))!=-1) {
 		switch(opt) {
 			case 'a':
 				aio = 1;
@@ -191,12 +187,6 @@ int main(int argc, char* argv[]) {
 #endif
 			case 'i':
 				init = 1;
-				break;
-			case 'p':
-				port = atoi(optarg);
-				break;
-			case 'h':
-				host = optarg;
 				break;
 			case 't':
 				maxthr = atoi(optarg);
@@ -284,36 +274,6 @@ int main(int argc, char* argv[]) {
 		target = &sim;
 	}
 #endif
-
-	if (argc-optind==1) {
-		/* Standalone mode */
-		fprintf(stderr, "Running in Standalone mode.\n");
-	} else {
-		fprintf(stderr, "Running in HoleyCoW mode (coordinator port = %d).\n", port);
-		/* HoleyCoW mode */
-		fd=socket(PF_INET, SOCK_STREAM, 0);
-
-		memset(&coord, 0, sizeof(struct sockaddr_in));
-		coord.sin_family = AF_INET;
-		coord.sin_port = htons(port);
-		inet_aton(host, &coord.sin_addr);
-
-		if (connect(fd, (struct sockaddr*) &coord, sizeof(struct sockaddr_in))<0) {
-			perror("connect coordination");
-			exit(1);
-		}
-	
-		if (null)
-			nullbe_open(&snapshot);
-		else if (aio)
-			aiobe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
-		else
-			posixbe_open(&snapshot, argv[optind+1], O_RDWR|O_CREAT, 0644);
-		holey_open(&cow, target, &snapshot, maxblk*BLKSIZE, fd);
-		blockalign(&ba, &cow);
-	
-		target = &ba;
-	}
 
 	workload(target);
 

@@ -1,7 +1,6 @@
-HoleyCoW allows replicated shared-nothing software (e.g. a DBMS
-server) to be used to build a shared-storage cluster. Bindings for the
-HolyeCoW stack for Xen and QEMU-KVM can be found elsewhere. Please
-ask.
+HoleyCoW-SBD is a simple user-mode stackable block device for 
+experimenting with storage.  Bindings for the HolyeCoW stack
+for Xen and QEMU-KVM can be found elsewhere. Please ask.
 
 To compile:
 

@@ -1,7 +1,6 @@
 /*
- * HoleyCoW
- * Copyright (c) 2008-2011 Universidade do Minho
- * Written by José Pereira, Luis Soares, and J. Paulo
+ * HoleyCoW-SBD
+ * Copyright (c) 2008-2011,2014 Universidade do Minho
  * 
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -27,7 +26,7 @@
 #include <libaio.h>
 #include <assert.h>
 
-#include "aiobe.h"
+#include <holeycow/aiobe.h>
 
 #define D(dev) ((struct aiobe_data*)(dev)->data)
 

@@ -11,8 +11,8 @@ ifdef DISKSIM
 DS_OBJS = backend/simbe.o
 endif
 
-OBJS = common/holeycow.o common/master_stab.o common/slave_stab.o common/device.o \
-	backend/nullbe.o backend/aiobe.o backend/posixbe.o $(DS_OBJS)
+OBJS = src/device.o \
+	src/nullbe.o src/aiobe.o src/posixbe.o $(DS_OBJS)
 
 all: libholeycow.a benchmark/benchmark
 

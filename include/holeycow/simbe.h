@@ -1,7 +1,6 @@
 /*
- * HoleyCoW
- * Copyright (c) 2010-2012 Universidade do Minho
- * Written by José Pereira.
+ * HoleyCoW-SBD
+ * Copyright (c) 2010-2012,2014 Universidade do Minho
  * 
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -22,7 +21,7 @@
 #ifndef __SIMBE
 #define __SIMBE
 
-#include <common/holeycow.h>
+#include <holeycow/device.h>
 
 extern int simbe_open(struct device* dev, struct device* target, const char* priv);
 

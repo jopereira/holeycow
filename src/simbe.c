@@ -1,7 +1,6 @@
 /*
- * HoleyCoW
- * Copyright (c) 2008-2012 Universidade do Minho
- * Written by José Pereira
+ * HoleyCoW-SBD
+ * Copyright (c) 2008-2012,2014 Universidade do Minho
  * 
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -25,7 +24,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "simbe.h"
+#include <holeycow/simbe.h>
 
 #include <disksim_interface.h>
 

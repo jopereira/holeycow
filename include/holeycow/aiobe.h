@@ -1,7 +1,6 @@
 /*
- * HoleyCoW
- * Copyright (c) 2010 Universidade do Minho
- * Written by José Pereira.
+ * HoleyCoW-SBD
+ * Copyright (c) 2010-2011,2014 Universidade do Minho
  * 
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -19,11 +18,11 @@
  */
 
 
-#ifndef __POSIXBE__
-#define __POSIXBE__
+#ifndef __AIOBE
+#define __AIOBE
 
-#include <common/holeycow.h>
+#include <holeycow/device.h>
 
-extern int nullbe_open(struct device* dev);
+extern int aiobe_open(struct device* dev, const char* path, int flags, mode_t mode);
 
 #endif
